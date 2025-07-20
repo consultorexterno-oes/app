@@ -18,9 +18,9 @@ from entrada_saida.funcoes_io import (
 from api.graph_api import carregar_semana_ativa
 
 # Configuração da página
-st.set_page_config(page_title="Refinador de Previsão Semanal", layout="wide")
+st.set_page_config(page_title="Rota 27", layout="wide")
 start_time_total = time.time()
-st.title("📊 Refinador de Previsão Semanal")
+st.title("📊 Refinado Semanal - O&S Gestão")
 
 # --- Semana ativa definida pelo administrador ---
 try:

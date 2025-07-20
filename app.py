@@ -22,6 +22,22 @@ st.set_page_config(page_title="Rota 27", layout="wide")
 start_time_total = time.time()
 st.title("📊 Refinado Semanal - O&S Gestão")
 
+# --- Tela de login simples ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.title("🔒 Acesso restrito")
+    senha = st.text_input("Digite a senha para entrar:", type="password")
+
+    if senha == "Narota27":
+        st.session_state.autenticado = True
+        st.success("✅ Acesso liberado! Aguarde o carregamento do sistema...")
+        st.experimental_rerun()
+    elif senha != "":
+        st.error("❌ Senha incorreta.")
+    st.stop()
+
 # --- Semana ativa definida pelo administrador ---
 try:
     semana_nova = carregar_semana_ativa()

@@ -22,7 +22,7 @@ if "autenticado_admin" not in st.session_state:
     st.session_state.autenticado_admin = False
 
 if not st.session_state.autenticado_admin:
-    st.title("🔐 Painel do Administrador")
+    st.subheader("🔑 Faça login para acessar os recursos e configurações do aplicativo")
     senha_admin = st.text_input("Digite a senha de administrador:", type="password")
 
     if senha_admin == "adm_oes":

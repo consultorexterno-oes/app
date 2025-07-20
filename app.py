@@ -27,7 +27,7 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
-    st.subheader("🔒 Acesso restrito")
+    st.subheader("🔐 Acesso restrito")
     senha = st.text_input("Digite a senha para entrar:", type="password")
 
     if senha == "Narota27":

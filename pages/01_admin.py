@@ -17,6 +17,22 @@ from api.graph_api import salvar_aba_controle
 st.set_page_config(page_title="Administração", layout="wide")
 st.title("🔐 Painel do Administrador")
 
+# --- Tela de login do administrador ---
+if "autenticado_admin" not in st.session_state:
+    st.session_state.autenticado_admin = False
+
+if not st.session_state.autenticado_admin:
+    st.title("🔐 Painel do Administrador")
+    senha_admin = st.text_input("Digite a senha de administrador:", type="password")
+
+    if senha_admin == "adm_oes":
+        st.session_state.autenticado_admin = True
+        st.success("✅ Acesso concedido!")
+        st.experimental_rerun()
+    elif senha_admin != "":
+        st.error("❌ Senha incorreta.")
+    st.stop()
+
 st.subheader("🚀 Iniciando carregamento de dados...")
 
 # --- Carrega os dados do SharePoint ---

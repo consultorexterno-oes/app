@@ -28,7 +28,7 @@ if not st.session_state.autenticado_admin:
     if senha_admin == "adm_oes":
         st.session_state.autenticado_admin = True
         st.success("✅ Acesso concedido!")
-        st.experimental_rerun()
+        st.rerun()
     elif senha_admin != "":
         st.error("❌ Senha incorreta.")
     st.stop()

@@ -33,7 +33,7 @@ if not st.session_state.autenticado:
     if senha == "Narota27":
         st.session_state.autenticado = True
         st.success("✅ Acesso liberado! Aguarde o carregamento do sistema...")
-        st.experimental_rerun()
+        st.rerun()
     elif senha != "":
         st.error("❌ Senha incorreta.")
     st.stop()

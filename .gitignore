@@ -1,0 +1,17 @@
+# Evita subir segredos e arquivos temporários
+.streamlit/secrets.toml
+
+# Evita cache de Python
+__pycache__/
+*.py[cod]
+
+# Evita ambientes virtuais
+.venv/
+venv/
+
+# Evita arquivos do VS Code
+.vscode/
+
+# Outros comuns
+*.log
+*.env

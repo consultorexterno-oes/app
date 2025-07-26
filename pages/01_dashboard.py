@@ -132,6 +132,11 @@ analises_selecionadas = st.sidebar.multiselect(
     default=["Receita Bruta Total", "Lucro Bruto (MC)"]
 )
 
+# Se nenhuma análise for selecionada
+if not analises_selecionadas:
+    st.warning("⚠️ Selecione pelo menos um indicador em **'Selecione as análises (indicadores agregados)'** para visualizar os gráficos.")
+    st.stop()
+
 # Seleção de meses
 colunas_meses = [
     col for col in df.columns

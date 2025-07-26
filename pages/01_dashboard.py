@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from entrada_saida.funcoes_io import carregar_previsto
 from api.graph_api import carregar_meses_permitidos
+from transformacao.funcoes_auxiliares import calcular_todos_indicadores
 
 # ============================
 # Configuração de Cores (Manual)
@@ -84,16 +85,9 @@ if "df_previsto" not in st.session_state:
 df = st.session_state.df_previsto
 meses_permitidos_admin = st.session_state.get("meses_permitidos", [])
 
-# --- Filtros ---
-VALORES_ANALISE = [
-    "RECEITA MAO DE OBRA",
-    "RECEITA LOCAÇÃO",
-    "RECEITA DE INDENIZAÇÃO",
-    "CUSTO COM MAO DE OBRA",
-    "CUSTO COM INSUMOS",
-    "LOCAÇÃO DE EQUIPAMENTOS"
-]
-
+# ============================
+# Filtros de Análise
+# ============================
 st.sidebar.subheader("🔍 Filtros de Análise")
 
 # Filtros hierárquicos
@@ -124,11 +118,18 @@ semanas_selecionadas = st.sidebar.multiselect(
     default=todas_semanas[-2:] if len(todas_semanas) >= 2 else todas_semanas
 )
 
-# Seleção de análises
+# Opções de indicadores agregados
+OPCOES_AGREGADAS = [
+    "Receita Bruta Total",
+    "Impostos sobre Receita",
+    "Custo Total",
+    "Lucro Bruto (MC)"
+]
+
 analises_selecionadas = st.sidebar.multiselect(
-    "Selecione as análises",
-    options=VALORES_ANALISE,
-    default=VALORES_ANALISE
+    "Selecione as análises (indicadores agregados)",
+    options=OPCOES_AGREGADAS,
+    default=["Receita Bruta Total", "Lucro Bruto (MC)"]
 )
 
 # Seleção de meses
@@ -149,10 +150,11 @@ meses_selecionados = st.sidebar.multiselect(
     default=meses_disponiveis[:3] if meses_disponiveis else []
 )
 
-# --- Processamento ---
+# ============================
+# Processamento dos indicadores
+# ============================
 df_filtrado = df[
     (df["Revisão"].isin(semanas_selecionadas)) &
-    (df["Análise de emissão"].isin(analises_selecionadas)) &
     (df["Gerência"] == gerencia_selecionada) &
     (df["Complexo"] == complexo_selecionado) &
     (df["Área"] == area_selecionada) &
@@ -164,93 +166,84 @@ if df_filtrado.empty:
     st.warning("Nenhum dado encontrado com os filtros selecionados")
     st.stop()
 
-# --- Gráficos ---
+# Calcula todos indicadores agregados
+indicadores = calcular_todos_indicadores(df_filtrado)
+
+# Filtra apenas os indicadores escolhidos pelo usuário
+dados_plot = pd.DataFrame([
+    {"Indicador": nome, "Valor": indicadores[nome + " (R$)"]}
+    for nome in analises_selecionadas
+])
+
+# ============================
+# Gráficos
+# ============================
 tab1, tab2, tab3 = st.tabs(["Comparativo por Análise", "Comparativo por Mês", "Dados Detalhados"])
 
+# --- TAB 1: Comparativo por Análise ---
 with tab1:
-    st.subheader(f"Comparativo por Tipo de Análise - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
-    
+    st.subheader(f"Comparativo por Indicadores - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
+
     if not meses_selecionados:
         st.warning("Selecione pelo menos um mês para análise")
     else:
-        df_agrupado = df_filtrado.groupby(["Revisão", "Análise de emissão"])[meses_selecionados].sum().reset_index()
-        df_agrupado["Total"] = df_agrupado[meses_selecionados].sum(axis=1)
-
-        # Calcular delta (diferença entre semana mais nova e mais antiga)
-        if len(semanas_selecionadas) >= 2:
-            semana_antiga = semanas_selecionadas[0]
-            semana_nova = semanas_selecionadas[-1]
-            df_pivot = df_agrupado.pivot(index="Análise de emissão", columns="Revisão", values="Total").fillna(0)
-            df_pivot["Delta"] = df_pivot.get(semana_nova, 0) - df_pivot.get(semana_antiga, 0)
-            df_agrupado = df_agrupado.merge(df_pivot["Delta"].reset_index(), on="Análise de emissão", how="left")
-        else:
-            df_agrupado["Delta"] = 0
-
-        # Gráfico
+        # Apenas gráfico com os indicadores agregados selecionados
         fig1 = px.bar(
-            df_agrupado,
-            x="Análise de emissão",
-            y="Total",
-            color="Revisão",
-            barmode="group",
+            dados_plot,
+            x="Indicador",
+            y="Valor",
             text_auto=True,
             height=500,
-            title=f"Total por Análise (Meses selecionados: {len(meses_selecionados)})",
-            color_discrete_sequence=paleta_graficos
+            color_discrete_sequence=paleta_graficos,
+            title=f"Indicadores agregados (Meses selecionados: {len(meses_selecionados)})"
         )
-
-        # Tooltip: valor + delta
         fig1.update_traces(
             texttemplate="R$ %{y:,.2f}",
-            hovertemplate="<b>%{x}</b><br>Valor: R$ %{y:,.2f}<br>Delta (nova - antiga): R$ %{customdata:,.2f}<extra></extra>",
-            customdata=df_agrupado["Delta"]
+            hovertemplate="Indicador: %{x}<br>Valor: R$ %{y:,.2f}<extra></extra>"
         )
-
         fig1.update_layout(
-            xaxis_title="Tipo de Análise",
+            xaxis_title="Indicador",
             yaxis_title="Valor Total (R$)",
-            legend_title="Semana",
             yaxis_tickformat=","
         )
 
         st.plotly_chart(fig1, use_container_width=True)
 
+# --- TAB 2: Comparativo por Mês ---
 with tab2:
-    st.subheader(f"Comparativo por Mês - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
+    st.subheader(f"Evolução Mensal por Indicadores - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
     st.info("""
-    Esta visualização mostra a evolução dos valores mês a mês para cada tipo de análise,
-    comparando as semanas selecionadas. Cada gráfico representa um tipo de análise diferente.
+    Evolução mês a mês dos valores dos indicadores agregados selecionados.
     """)
-    
+
     if not meses_selecionados:
         st.warning("Selecione pelo menos um mês para visualizar este gráfico")
     else:
-        df_melted = df_filtrado.melt(
-            id_vars=["Revisão", "Análise de emissão"],
-            value_vars=meses_selecionados,
-            var_name="Mês",
-            value_name="Valor"
-        )
-        df_melted["Mês"] = pd.to_datetime(df_melted["Mês"], dayfirst=True)
-        df_melted["Mês Formatado"] = df_melted["Mês"].dt.strftime("%b/%Y")
-        
+        # Montar DataFrame mensal com os indicadores agregados
+        df_mes = []
+        for indicador in analises_selecionadas:
+            valor = indicadores[indicador + " (R$)"]
+            for mes in meses_selecionados:
+                df_mes.append({
+                    "Indicador": indicador,
+                    "Mês": pd.to_datetime(mes, dayfirst=True).strftime("%b/%Y"),
+                    "Valor": valor
+                })
+        df_mes = pd.DataFrame(df_mes)
+
         fig2 = px.bar(
-            df_melted,
-            x="Mês Formatado",
+            df_mes,
+            x="Mês",
             y="Valor",
-            color="Revisão",
-            facet_col="Análise de emissão",
-            facet_col_wrap=2,
+            color="Indicador",
             barmode="group",
             height=800,
-            title="Evolução Mensal por Tipo de Análise",
-            labels={"Mês Formatado": "Mês", "Valor": "Valor (R$)"},
-            color_discrete_sequence=paleta_graficos
+            color_discrete_sequence=paleta_graficos,
+            title="Evolução Mensal dos Indicadores"
         )
-
         fig2.update_traces(
             texttemplate="R$ %{y:,.2f}",
-            hovertemplate="R$ %{y:,.2f}<extra></extra>"
+            hovertemplate="Mês: %{x}<br>Indicador: %{color}<br>Valor: R$ %{y:,.2f}<extra></extra>"
         )
         fig2.update_layout(
             hovermode="x unified",
@@ -260,15 +253,16 @@ with tab2:
 
         st.plotly_chart(fig2, use_container_width=True)
 
+# --- TAB 3: Dados Detalhados ---
 with tab3:
     st.subheader(f"Dados Detalhados - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
     st.dataframe(
-        df_filtrado.sort_values(["Revisão", "Análise de emissão"]),
+        df_filtrado.sort_values(["Revisão"]),
         use_container_width=True,
         height=600
     )
 
-# Botão recarregar dados
+# --- Botão recarregar ---
 if st.sidebar.button("🔄 Recarregar dados"):
     st.cache_data.clear()
     if "df_previsto" in st.session_state:

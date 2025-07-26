@@ -26,8 +26,32 @@ def carregar_refinado(_, colunas_id, colunas_meses):
         return pd.DataFrame(columns=colunas_id + ["Mes", "Valor", "Semana"])
 
 # 💾 Salva na aba "Base de Dados"
-def salvar_base_dados(df):
-    salvar_apenas_aba("Base de Dados", df)
+def salvar_base_dados(df, append=False):
+    """
+    Salva dados na aba 'Base de Dados'.
+    - Se append=False (padrão): substitui toda a aba.
+    - Se append=True: baixa a aba existente, concatena com o novo df e salva.
+    """
+    if not append:
+        # Salva sobrescrevendo tudo (comportamento atual)
+        salvar_apenas_aba("Base de Dados", df)
+    else:
+        # Salva apenas novas linhas (incremental)
+        try:
+            # Baixa dados atuais
+            sheets = baixar_arquivo_excel()
+            if "Base de Dados" in sheets:
+                df_existente = sheets["Base de Dados"]
+                df_final = pd.concat([df_existente, df], ignore_index=True)
+            else:
+                df_final = df
+
+            # Salva de volta
+            sheets["Base de Dados"] = df_final
+            salvar_arquivo_excel_modificado(sheets)
+        except Exception as e:
+            st.error(f"Erro ao salvar incrementalmente na aba 'Base de Dados': {e}")
+            raise
 
 # 💾 Salva na aba "Refinado"
 def salvar_refinado(df, _):

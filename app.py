@@ -15,9 +15,9 @@ from api.graph_api import carregar_semana_ativa
 # ============================
 # Cores e estilo
 # ============================
-bg_color = "#FFFFFF"   # Fundo branco
-fg_color = "#000000"   # Texto preto
-accent_color = "#033347"  # Azul escuro
+bg_color = "#FFFFFF"
+fg_color = "#000000"
+accent_color = "#033347"
 
 st.set_page_config(page_title="Rota 27", layout="wide")
 
@@ -105,50 +105,6 @@ if st.sidebar.button("🔄 Recarregar dados"):
     st.rerun()
 
 # ============================
-# Carregar semana ativa
-# ============================
-if "semana_nova" not in st.session_state:
-    try:
-        # 1. Carrega semana ativa do Controle
-        semana_info = carregar_semana_ativa()
-
-        if not semana_info:
-            st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
-            st.stop()
-
-        semana_controle = semana_info.get("semana", "")
-        meses_controle = semana_info.get("meses_permitidos", [])
-
-        # 2. Carrega base para validar se semana existe
-        df_temp = carregar_previsto(None)
-        revisoes_disponiveis = sorted(df_temp["Revisão"].dropna().unique())
-
-        # 3. Se semana do Controle não existe mais, pega última válida
-        if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
-            semana_corrigida = revisoes_disponiveis[-1]
-            st.sidebar.warning(
-                f"A semana '{semana_controle}' não existe mais. Usando '{semana_corrigida}' como ativa."
-            )
-            st.session_state.semana_nova = semana_corrigida
-            st.session_state.meses_permitidos_admin = meses_controle
-        else:
-            st.session_state.semana_nova = semana_controle
-            st.session_state.meses_permitidos_admin = meses_controle
-
-        st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
-        if st.session_state.meses_permitidos_admin:
-            st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
-
-    except Exception as e:
-        st.sidebar.error("Erro ao carregar a semana ativa.")
-        st.exception(e)
-        st.stop()
-else:
-    st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
-    if st.session_state.meses_permitidos_admin:
-        st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
-
-# ============================
 # Carregar dados de previsão
 # ============================
 if "df_previsto" not in st.session_state:
@@ -165,7 +121,63 @@ else:
     st.sidebar.info("📅 Usando dados do cache (clique em 'Recarregar dados' para atualizar)")
 
 # ============================
-# Lógica de edição (sem mudanças estruturais)
+# Carregar e validar semana ativa
+# ============================
+if "semana_nova" not in st.session_state:
+    try:
+        semana_info = carregar_semana_ativa()
+
+        if not semana_info:
+            st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
+            st.stop()
+
+        semana_controle = semana_info.get("semana", "")
+        meses_controle = semana_info.get("meses_permitidos", [])
+
+        # Validar com base carregada
+        revisoes_disponiveis = sorted(st.session_state.df_previsto["Revisão"].dropna().unique())
+
+        if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
+            # Corrigir para última válida
+            semana_corrigida = revisoes_disponiveis[-1]
+            st.sidebar.warning(
+                f"A semana '{semana_controle}' não existe mais. Usando '{semana_corrigida}' como ativa."
+            )
+
+            st.session_state.semana_nova = semana_corrigida
+            st.session_state.meses_permitidos_admin = meses_controle
+
+            # Atualizar aba Controle automaticamente
+            df_controle_corrigido = pd.DataFrame({
+                "Semana Ativa": [semana_corrigida],
+                "Meses Permitidos": [";".join(meses_controle)]
+            })
+            try:
+                salvar_em_aba(df_controle_corrigido, aba="Controle")
+                st.sidebar.info("Controle atualizado automaticamente com a nova semana ativa.")
+            except Exception as e:
+                st.sidebar.error("Erro ao atualizar Controle com semana corrigida.")
+                st.exception(e)
+        else:
+            # Semana válida
+            st.session_state.semana_nova = semana_controle
+            st.session_state.meses_permitidos_admin = meses_controle
+
+        st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
+        if st.session_state.meses_permitidos_admin:
+            st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
+
+    except Exception as e:
+        st.sidebar.error("Erro ao carregar/validar semana ativa.")
+        st.exception(e)
+        st.stop()
+else:
+    st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
+    if st.session_state.meses_permitidos_admin:
+        st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
+
+# ============================
+# Lógica de edição
 # ============================
 
 VALORES_ANALISE = [
@@ -199,7 +211,7 @@ if "edicoes" not in st.session_state:
     st.session_state.edicoes = []
 
 # ============================
-# Filtros do dataframe
+# Filtros para visualização
 # ============================
 st.subheader("🔎 Filtros para Visualização")
 
@@ -267,15 +279,15 @@ with col_edit1:
 with col_edit2:
     gerencia_edit = st.selectbox("Gerência para edição", df_semana["Gerência"].dropna().unique(), key="gerencia_edit")
 with col_edit3:
-    complexo_edit = st.selectbox("Complexo para edição", 
-                               df_semana[df_semana["Gerência"] == gerencia_edit]["Complexo"].dropna().unique(), 
+    complexo_edit = st.selectbox("Complexo para edição",
+                               df_semana[df_semana["Gerência"] == gerencia_edit]["Complexo"].dropna().unique(),
                                key="complexo_edit")
 
 col_edit4, col_edit5 = st.columns(2)
 with col_edit4:
-    area_edit = st.selectbox("Área para edição", 
+    area_edit = st.selectbox("Área para edição",
                            df_semana[
-                               (df_semana["Gerência"] == gerencia_edit) & 
+                               (df_semana["Gerência"] == gerencia_edit) &
                                (df_semana["Complexo"] == complexo_edit)
                            ]["Área"].dropna().unique(),
                            key="area_edit")

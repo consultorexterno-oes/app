@@ -4,17 +4,19 @@ import sys
 import os
 from datetime import datetime
 
-# Ajuste de path
+# Ajuste do path para importar módulos
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from entrada_saida.funcoes_io import carregar_previsto, salvar_base_dados, salvar_em_aba
 
-# ============================
-# Configuração da Página
-# ============================
+# =====================================================
+# CONFIGURAÇÃO DA PÁGINA
+# =====================================================
 st.set_page_config(page_title="Administração", layout="wide")
 
-# Estilos
+# =====================================================
+# ESTILOS PERSONALIZADOS
+# =====================================================
 st.markdown(
     """
     <style>
@@ -41,13 +43,15 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Logo e título
+# =====================================================
+# LOGO E TÍTULO
+# =====================================================
 st.image("assets/Logo Rota 27.png", width=300)
 st.title("⚙️ Painel do Administrador do App")
 
-# ============================
-# Autenticação simples
-# ============================
+# =====================================================
+# AUTENTICAÇÃO SIMPLES
+# =====================================================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
@@ -58,14 +62,14 @@ if not st.session_state.autenticado:
     if senha == "adm_oes":  # Senha fixa para admin
         st.session_state.autenticado = True
         st.success("✅ Acesso liberado!")
-        st.rerun()
+        st.experimental_rerun()
     elif senha != "":
         st.error("❌ Senha incorreta.")
     st.stop()
 
-# ============================
-# Carregar dados
-# ============================
+# =====================================================
+# CARREGAR BASE DE DADOS
+# =====================================================
 if "df_previsto" not in st.session_state:
     try:
         with st.spinner("📊 Carregando base de dados..."):
@@ -77,9 +81,9 @@ if "df_previsto" not in st.session_state:
 
 df_previsto = st.session_state.df_previsto
 
-# ============================
-# Escolher Revisão para duplicar
-# ============================
+# =====================================================
+# SELECIONAR REVISÃO PARA DUPLICAR
+# =====================================================
 st.subheader("📌 Escolha a Revisão para duplicar")
 
 revisoes_disponiveis = sorted(df_previsto["Revisão"].dropna().unique())
@@ -87,12 +91,12 @@ revisao_origem = st.selectbox("Revisão (origem dos dados)", revisoes_disponivei
 
 nome_nova_semana = st.text_input("Nome da nova semana", placeholder="Ex: Semana 29")
 
-# ============================
-# Selecionar meses permitidos
-# ============================
+# =====================================================
+# SELECIONAR MESES LIBERADOS
+# =====================================================
 st.subheader("📅 Selecione os meses que os gerentes poderão refinar")
 
-# Colunas que são meses (detectadas por data)
+# Identificar colunas que são meses (datas ou texto mmm/aaaa)
 colunas_meses = [
     col for col in df_previsto.columns
     if pd.notnull(pd.to_datetime(col, errors="coerce", dayfirst=True))
@@ -101,51 +105,58 @@ colunas_meses = [
 meses_selecionados = st.multiselect(
     "Meses liberados para edição",
     options=colunas_meses,
-    default=colunas_meses[-6:]  # últimos 6 meses por padrão
+    default=colunas_meses[-6:] if len(colunas_meses) > 0 else []
 )
 
-# ============================
-# Criar nova semana
-# ============================
+# =====================================================
+# CRIAR NOVA SEMANA
+# =====================================================
 if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
     if not nome_nova_semana:
         st.warning("Informe o nome da nova semana antes de prosseguir.")
     else:
         try:
-            # Duplicar registros
+            # 1. Copiar dados da revisão origem
             df_nova = df_previsto[df_previsto["Revisão"] == revisao_origem].copy()
             df_nova["Revisão"] = nome_nova_semana
 
-            # Meses liberados (registrar em aba Controle)
+            # 2. Registrar meses permitidos na aba Controle
             df_controle = pd.DataFrame({
-                "semana": [nome_nova_semana],
-                "meses_permitidos": [meses_selecionados],
-                "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                "Semana Ativa": [nome_nova_semana],
+                "Meses Permitidos": [";".join(meses_selecionados)],
+                "Data Criação": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
             })
 
-            # Salvar na base principal
+            # 3. Salvar nova base (empilhando dados)
             df_final = pd.concat([df_previsto, df_nova], ignore_index=True)
             salvar_base_dados(df_final)
 
-            # Salvar controle
+            # 4. Atualizar aba Controle no SharePoint
             salvar_em_aba(df_controle, aba="Controle")
 
-            st.success(f"Semana **{nome_nova_semana}** criada com sucesso e meses liberados configurados!")
+            st.success(
+                f"Semana **{nome_nova_semana}** criada com sucesso! "
+                "Meses liberados configurados."
+            )
         except Exception as e:
             st.error("Erro ao criar a nova semana.")
             st.exception(e)
 
-# ============================
-# Visualizar base atual
-# ============================
+# =====================================================
+# VISUALIZAR BASE ATUAL
+# =====================================================
 st.subheader("📋 Base de Dados Atual (visualização)")
-st.dataframe(df_previsto.sort_values("Revisão"), use_container_width=True, height=400)
+st.dataframe(
+    df_previsto.sort_values("Revisão"),
+    use_container_width=True,
+    height=400
+)
 
-# ============================
-# Botão de recarregamento
-# ============================
+# =====================================================
+# BOTÃO DE RECARREGAR DADOS
+# =====================================================
 if st.sidebar.button("🔄 Recarregar dados"):
     st.cache_data.clear()
     if "df_previsto" in st.session_state:
         del st.session_state["df_previsto"]
-    st.rerun()
+    st.experimental_rerun()

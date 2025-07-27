@@ -43,7 +43,7 @@ st.markdown(
 
 # Logo e título
 st.image("assets/Logo Rota 27.png", width=300)
-st.title("⚙️ Painel Administrativo")
+st.title("⚙️ Painel do Administrador do App")
 
 # ============================
 # Autenticação simples
@@ -55,7 +55,7 @@ if not st.session_state.autenticado:
     st.subheader("🔐 Acesso restrito")
     senha = st.text_input("Digite a senha para entrar:", type="password")
 
-    if senha == "Narota27":  # Senha fixa para admin
+    if senha == "adm_oes":  # Senha fixa para admin
         st.session_state.autenticado = True
         st.success("✅ Acesso liberado!")
         st.rerun()

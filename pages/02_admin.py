@@ -3,7 +3,7 @@ import pandas as pd
 import sys
 import os
 from datetime import datetime
-import time  # Adicionado para medir o tempo
+import time
 
 # Ajuste de path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -44,6 +44,14 @@ st.markdown(
         color: #555;
         margin-top: 5px;
     }
+    .sidebar-timer {
+        font-size: 0.8em;
+        color: #666;
+        background: #f0f0f0;
+        padding: 5px;
+        border-radius: 4px;
+        margin-top: 10px;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -78,10 +86,10 @@ if not st.session_state.autenticado:
 # =====================================================
 if "df_previsto" not in st.session_state:
     try:
-        start_time = time.time()  # Inicia o timer
+        start_time = time.time()
         with st.spinner("📊 Carregando base de dados..."):
             st.session_state.df_previsto = carregar_previsto(None)
-            load_time = time.time() - start_time  # Calcula tempo de carregamento
+            load_time = time.time() - start_time
             st.markdown(f'<div class="timer">Tempo de carregamento: {load_time:.2f} segundos</div>', 
                        unsafe_allow_html=True)
     except Exception as e:
@@ -126,7 +134,7 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
         st.warning("Informe o nome da nova semana antes de prosseguir.")
     else:
         try:
-            start_time = time.time()  # Inicia o timer para criação da nova semana
+            start_time = time.time()
             
             # 1. Duplicar registros
             df_nova = df_previsto[df_previsto["Revisão"] == revisao_origem].copy()
@@ -147,7 +155,7 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
             # 4. Limpar cache para refletir nova semana no app
             st.cache_data.clear()
 
-            creation_time = time.time() - start_time  # Calcula tempo de criação
+            creation_time = time.time() - start_time
             st.success(
                 f"Semana **{nome_nova_semana}** criada com sucesso e definida como ativa!"
             )
@@ -161,16 +169,36 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
 # VISUALIZAR BASE ATUAL
 # =====================================================
 st.subheader("📋 Base de Dados Atual (visualização)")
-start_render_time = time.time()  # Inicia o timer para renderização
+start_render_time = time.time()
 st.dataframe(
     df_previsto.sort_values("Revisão"),
     use_container_width=True,
     height=400
 )
-render_time = time.time() - start_render_time  # Calcula tempo de renderização
+render_time = time.time() - start_render_time
 st.markdown(f'<div class="timer">Tempo de renderização: {render_time:.2f} segundos</div>', 
            unsafe_allow_html=True)
 
+# =====================================================
+# BOTÃO DE RECARREGAR DADOS
+# =====================================================
+if "reload_time" not in st.session_state:
+    st.session_state.reload_time = 0
+
+if st.sidebar.button("🔄 Recarregar dados"):
+    start_reload_time = time.time()
+    st.cache_data.clear()
+    if "df_previsto" in st.session_state:
+        del st.session_state["df_previsto"]
+    st.session_state.reload_time = time.time() - start_reload_time
+    st.experimental_rerun()
+
+# Mostrar o tempo de recarregamento na sidebar (mesmo após o rerun)
+if st.session_state.reload_time > 0:
+    st.sidebar.markdown(
+        f'<div class="sidebar-timer">Último recarregamento: {st.session_state.reload_time:.2f} segundos</div>',
+        unsafe_allow_html=True
+    )
 # =====================================================
 # BOTÃO DE RECARREGAR DADOS
 # =====================================================

@@ -3,6 +3,7 @@ import pandas as pd
 import sys
 import os
 from datetime import datetime
+import time  # <- Para cronometrar
 
 # Ajuste do path para importar módulos
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -13,6 +14,15 @@ from entrada_saida.funcoes_io import carregar_previsto, salvar_base_dados, salva
 # CONFIGURAÇÃO DA PÁGINA
 # =====================================================
 st.set_page_config(page_title="Administração", layout="wide")
+
+# =====================================================
+# FUNÇÃO AUXILIAR DE CRONÔMETRO
+# =====================================================
+def marcar_tempo(inicio, etapa):
+    fim = time.time()
+    duracao = fim - inicio
+    st.write(f"⏱ **{etapa}:** {duracao:.2f} segundos")
+    return fim
 
 # =====================================================
 # ESTILOS PERSONALIZADOS
@@ -68,8 +78,11 @@ if not st.session_state.autenticado:
     st.stop()
 
 # =====================================================
-# CARREGAR BASE DE DADOS
+# CARREGAR BASE DE DADOS COM CRONÔMETRO
 # =====================================================
+inicio_total = time.time()
+
+inicio = time.time()
 if "df_previsto" not in st.session_state:
     try:
         with st.spinner("📊 Carregando base de dados..."):
@@ -78,14 +91,14 @@ if "df_previsto" not in st.session_state:
         st.error("Erro ao carregar a base de dados.")
         st.exception(e)
         st.stop()
+fim = marcar_tempo(inicio, "Carregamento da base")
 
 df_previsto = st.session_state.df_previsto
 
 # =====================================================
-# SELECIONAR REVISÃO PARA DUPLICAR
+# SELECIONAR REVISÃO
 # =====================================================
 st.subheader("📌 Escolha a Revisão para duplicar")
-
 revisoes_disponiveis = sorted(df_previsto["Revisão"].dropna().unique())
 revisao_origem = st.selectbox("Revisão (origem dos dados)", revisoes_disponiveis)
 
@@ -96,7 +109,6 @@ nome_nova_semana = st.text_input("Nome da nova semana", placeholder="Ex: Semana 
 # =====================================================
 st.subheader("📅 Selecione os meses que os gerentes poderão refinar")
 
-# Identificar colunas que são meses (datas ou texto mmm/aaaa)
 colunas_meses = [
     col for col in df_previsto.columns
     if pd.notnull(pd.to_datetime(col, errors="coerce", dayfirst=True))
@@ -116,28 +128,37 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
         st.warning("Informe o nome da nova semana antes de prosseguir.")
     else:
         try:
-            # 1. Copiar dados da revisão origem
+            # Duplicar registros
+            inicio = time.time()
             df_nova = df_previsto[df_previsto["Revisão"] == revisao_origem].copy()
             df_nova["Revisão"] = nome_nova_semana
+            fim = marcar_tempo(inicio, "Duplicação dos dados")
 
-            # 2. Registrar meses permitidos na aba Controle
+            # Meses liberados (registrar em aba Controle)
             df_controle = pd.DataFrame({
                 "Semana Ativa": [nome_nova_semana],
                 "Meses Permitidos": [";".join(meses_selecionados)],
                 "Data Criação": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
             })
 
-            # 3. Salvar nova base (empilhando dados)
+            # Salvar base principal
+            inicio = time.time()
             df_final = pd.concat([df_previsto, df_nova], ignore_index=True)
             salvar_base_dados(df_final)
+            fim = marcar_tempo(inicio, "Salvar base principal")
 
-            # 4. Atualizar aba Controle no SharePoint
+            # Salvar controle
+            inicio = time.time()
             salvar_em_aba(df_controle, aba="Controle")
+            fim = marcar_tempo(inicio, "Salvar aba Controle")
 
+            # Tempo total
+            fim_total = time.time()
             st.success(
-                f"Semana **{nome_nova_semana}** criada com sucesso! "
-                "Meses liberados configurados."
+                f"Semana **{nome_nova_semana}** criada com sucesso!\n\n"
+                f"⏱ **Tempo total:** {fim_total - inicio_total:.2f} segundos"
             )
+
         except Exception as e:
             st.error("Erro ao criar a nova semana.")
             st.exception(e)

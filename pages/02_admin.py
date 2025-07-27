@@ -9,6 +9,7 @@ import time
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from entrada_saida.funcoes_io import carregar_previsto, salvar_base_dados, salvar_em_aba
+from api.graph_api import baixar_aba_excel
 
 # =====================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -100,6 +101,17 @@ if "df_previsto" not in st.session_state:
 df_previsto = st.session_state.df_previsto
 
 # =====================================================
+# CARREGAR CONTROLE PARA VER SEMANA ATIVA E HISTÓRICO
+# =====================================================
+try:
+    df_controle = baixar_aba_excel("Controle")
+except Exception:
+    df_controle = pd.DataFrame(columns=["Semana Ativa", "Meses Permitidos", "semana", "meses_permitidos", "data_criacao"])
+
+# Obter semana ativa atual
+semana_ativa_atual = df_controle["Semana Ativa"].iloc[0] if not df_controle.empty else None
+
+# =====================================================
 # SELECIONAR REVISÃO PARA DUPLICAR
 # =====================================================
 st.subheader("📌 Escolha a Revisão para duplicar")
@@ -107,7 +119,7 @@ st.subheader("📌 Escolha a Revisão para duplicar")
 revisoes_disponiveis = sorted(df_previsto["Revisão"].dropna().unique())
 revisao_origem = st.selectbox("Revisão (origem dos dados)", revisoes_disponiveis)
 
-nome_nova_semana = st.text_input("Nome da nova semana", placeholder="Ex: Semana 35")
+nome_nova_semana = st.text_input("Nome da nova semana", placeholder="Ex: Semana 37")
 
 # =====================================================
 # SELECIONAR MESES LIBERADOS
@@ -127,7 +139,7 @@ meses_selecionados = st.multiselect(
 )
 
 # =====================================================
-# CRIAR NOVA SEMANA
+# CRIAR NOVA SEMANA (E DEFINIR COMO ATIVA)
 # =====================================================
 if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
     if not nome_nova_semana:
@@ -135,7 +147,7 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
     else:
         try:
             start_time = time.time()
-            
+
             # 1. Duplicar registros
             df_nova = df_previsto[df_previsto["Revisão"] == revisao_origem].copy()
             df_nova["Revisão"] = nome_nova_semana
@@ -144,15 +156,17 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
             df_final = pd.concat([df_previsto, df_nova], ignore_index=True)
             salvar_base_dados(df_final)
 
-            # 3. Atualizar aba Controle (marcando nova semana como ativa)
-            df_controle = pd.DataFrame({
+            # 3. Atualizar aba Controle
+            df_controle_novo = pd.DataFrame({
                 "Semana Ativa": [nome_nova_semana],
                 "Meses Permitidos": [";".join(meses_selecionados)],
-                "Data Criação": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                "semana": [nome_nova_semana],
+                "meses_permitidos": [str(meses_selecionados)],
+                "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
             })
-            salvar_em_aba(df_controle, aba="Controle")
+            salvar_em_aba(df_controle_novo, aba="Controle")
 
-            # 4. Limpar cache para refletir nova semana no app
+            # 4. Limpar cache
             st.cache_data.clear()
 
             creation_time = time.time() - start_time
@@ -164,6 +178,44 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
         except Exception as e:
             st.error("Erro ao criar a nova semana.")
             st.exception(e)
+
+# =====================================================
+# PERMITIR AO ADMIN ALTERAR SEMANA ATIVA MANUALMENTE
+# =====================================================
+st.subheader("🔄 Alterar Semana Ativa Manualmente")
+
+# Listar semanas criadas (coluna 'semana' da aba Controle)
+semanas_historico = df_controle["semana"].dropna().unique().tolist() if "semana" in df_controle.columns else []
+
+if semanas_historico:
+    semana_escolhida = st.selectbox(
+        "Selecione a semana para ativar",
+        semanas_historico,
+        index=semanas_historico.index(semana_ativa_atual) if semana_ativa_atual in semanas_historico else 0
+    )
+
+    if st.button("Ativar Semana Selecionada"):
+        try:
+            # Atualizar aba Controle com nova semana ativa
+            meses_permitidos_semana = df_controle.loc[df_controle["semana"] == semana_escolhida, "meses_permitidos"].values
+            meses_formatados = meses_permitidos_semana[0] if len(meses_permitidos_semana) > 0 else ""
+
+            df_controle_ativo = pd.DataFrame({
+                "Semana Ativa": [semana_escolhida],
+                "Meses Permitidos": [meses_formatados],
+                "semana": [semana_escolhida],
+                "meses_permitidos": [meses_formatados],
+                "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+            })
+            salvar_em_aba(df_controle_ativo, aba="Controle")
+
+            st.cache_data.clear()
+            st.success(f"Semana **{semana_escolhida}** definida como ativa!")
+        except Exception as e:
+            st.error("Erro ao ativar semana selecionada.")
+            st.exception(e)
+else:
+    st.info("Nenhuma semana disponível para ativação manual.")
 
 # =====================================================
 # VISUALIZAR BASE ATUAL
@@ -182,32 +234,14 @@ st.markdown(f'<div class="timer">Tempo de renderização: {render_time:.2f} segu
 # =====================================================
 # BOTÃO DE RECARREGAR DADOS
 # =====================================================
-if "reload_time" not in st.session_state:
-    st.session_state.reload_time = 0
-
 if st.sidebar.button("🔄 Recarregar dados"):
     start_reload_time = time.time()
     st.cache_data.clear()
     if "df_previsto" in st.session_state:
         del st.session_state["df_previsto"]
-    st.session_state.reload_time = time.time() - start_reload_time
-    st.experimental_rerun()
-
-# Mostrar o tempo de recarregamento na sidebar (mesmo após o rerun)
-if st.session_state.reload_time > 0:
+    reload_time = time.time() - start_reload_time
     st.sidebar.markdown(
-        f'<div class="sidebar-timer">Último recarregamento: {st.session_state.reload_time:.2f} segundos</div>',
+        f'<div class="sidebar-timer">Tempo de recarregamento: {reload_time:.2f} segundos</div>',
         unsafe_allow_html=True
     )
-# =====================================================
-# BOTÃO DE RECARREGAR DADOS
-# =====================================================
-if st.sidebar.button("🔄 Recarregar dados"):
-    start_reload_time = time.time()  # Inicia o timer para recarregar
-    st.cache_data.clear()
-    if "df_previsto" in st.session_state:
-        del st.session_state["df_previsto"]
-    reload_time = time.time() - start_reload_time  # Calcula tempo de recarregamento
-    st.sidebar.markdown(f'<div class="timer">Tempo de recarregamento: {reload_time:.2f} segundos</div>', 
-                      unsafe_allow_html=True)
     st.experimental_rerun()

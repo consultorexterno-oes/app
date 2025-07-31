@@ -4,6 +4,7 @@ from io import BytesIO
 import streamlit as st
 import urllib.parse
 import time
+import hashlib
 
 # =====================================================
 # CONFIGURAÇÕES DO AZURE (Secrets do Streamlit)
@@ -26,7 +27,6 @@ ARQUIVO = "Teste_Refinado - Preenchimento dos gerentes.xlsx"
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 RESOURCE = "https://graph.microsoft.com/.default"
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
-
 
 # =====================================================
 # FUNÇÕES AUXILIARES DE AUTENTICAÇÃO E BUSCA DE IDS
@@ -89,7 +89,6 @@ def buscar_item_id(site_id: str, drive_id: str, token: str) -> str:
     if "id" not in json_resp:
         raise FileNotFoundError(f"Arquivo '{caminho_arquivo}' não encontrado no SharePoint.")
     return json_resp["id"]
-
 
 # =====================================================
 # FUNÇÕES PARA DOWNLOAD DO EXCEL
@@ -167,6 +166,20 @@ def salvar_apenas_aba(nome_aba: str, df_novo: pd.DataFrame) -> bool:
 
 
 # =====================================================
+# FUNÇÃO PARA CARREGAR USUÁRIOS
+# =====================================================
+def load_users():
+    """Carrega os usuários da aba 'Usuarios'"""
+    try:
+        df_users = baixar_aba_excel("Usuarios")
+        if df_users.empty:
+            return pd.DataFrame(columns=["username", "password_hash", "role", "created_at"])
+        return df_users
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {str(e)}")
+        return pd.DataFrame(columns=["username", "password_hash", "role", "created_at"])
+
+# =====================================================
 # CONTROLE DE SEMANA ATIVA E MESES PERMITIDOS
 # =====================================================
 
@@ -210,3 +223,20 @@ def carregar_semana_ativa() -> dict | None:
         st.error("Erro ao carregar a aba 'Controle'")
         st.exception(e)
         return None
+
+
+# =====================================================
+# CARREGAR MESES PERMITIDOS (nova função)
+# =====================================================
+
+def carregar_meses_permitidos() -> list[str]:
+    """Carrega a lista de meses permitidos da aba Controle"""
+    try:
+        dados_controle = carregar_semana_ativa()
+        if dados_controle:
+            return dados_controle.get("meses_permitidos", [])
+        return []
+    except Exception as e:
+        st.error("Erro ao carregar meses permitidos")
+        st.exception(e)
+        return []

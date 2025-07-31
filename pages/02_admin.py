@@ -4,6 +4,7 @@ import sys
 import os
 from datetime import datetime
 import time
+import hashlib
 
 # Ajuste de path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -53,10 +54,95 @@ st.markdown(
         border-radius: 4px;
         margin-top: 10px;
     }
+    .user-table {
+        margin-top: 20px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding: 0 20px;
+        background-color: #F0F2F6;
+        border-radius: 4px 4px 0 0;
+        margin-right: 5px !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #033347;
+        color: white;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
+
+# =====================================================
+# FUNÇÕES DE GERENCIAMENTO DE USUÁRIOS
+# =====================================================
+def hash_password(password):
+    """Cria um hash da senha para armazenamento seguro"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def load_users():
+    """Carrega os usuários da aba 'Usuarios'"""
+    try:
+        df_users = baixar_aba_excel("Usuarios")
+        if df_users.empty:
+            return pd.DataFrame(columns=["username", "password_hash", "role", "created_at"])
+        return df_users
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {str(e)}")
+        return pd.DataFrame(columns=["username", "password_hash", "role", "created_at"])
+
+def save_users(df_users):
+    """Salva os usuários na aba 'Usuarios'"""
+    try:
+        salvar_em_aba(df_users, aba="Usuarios")
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar usuários: {str(e)}")
+        return False
+
+def add_user(username, password, role="gerente"):
+    """Adiciona um novo usuário"""
+    df_users = load_users()
+    
+    if username.strip() == "":
+        return False, "Nome de usuário não pode ser vazio"
+    
+    if username in df_users["username"].values:
+        return False, "Usuário já existe"
+    
+    if password.strip() == "":
+        return False, "Senha não pode ser vazia"
+    
+    new_user = pd.DataFrame({
+        "username": [username],
+        "password_hash": [hash_password(password)],
+        "role": [role],
+        "created_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+    })
+    
+    df_users = pd.concat([df_users, new_user], ignore_index=True)
+    if save_users(df_users):
+        return True, "Usuário cadastrado com sucesso"
+    else:
+        return False, "Erro ao salvar usuário"
+
+def delete_user(username):
+    """Remove um usuário"""
+    df_users = load_users()
+    if username not in df_users["username"].values:
+        return False, "Usuário não encontrado"
+    
+    df_users = df_users[df_users["username"] != username]
+    if save_users(df_users):
+        return True, "Usuário removido com sucesso"
+    else:
+        return False, "Erro ao remover usuário"
 
 # =====================================================
 # LOGO E TÍTULO
@@ -72,14 +158,22 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state.autenticado:
     st.subheader("🔐 Acesso restrito")
-    senha = st.text_input("Digite a senha para entrar:", type="password")
+    username_input = st.text_input("Digite o nome de usuário:")
+    password_input = st.text_input("Digite a senha:", type="password")
 
-    if senha == "adm_oes":  # Senha fixa para admin
-        st.session_state.autenticado = True
-        st.success("✅ Acesso liberado!")
-        st.experimental_rerun()
-    elif senha != "":
-        st.error("❌ Senha incorreta.")
+    if st.button("Entrar"):
+        df_users = load_users()
+        user = df_users[df_users["username"] == username_input]
+        
+        if user.empty:
+            st.error("❌ Usuário não encontrado.")
+        else:
+            if hash_password(password_input) == user["password_hash"].iloc[0]:
+                st.session_state.autenticado = True
+                st.success("✅ Acesso liberado!")
+                st.rerun()
+            else:
+                st.error("❌ Senha incorreta.")
     st.stop()
 
 # =====================================================
@@ -101,7 +195,83 @@ if "df_previsto" not in st.session_state:
 df_previsto = st.session_state.df_previsto
 
 # =====================================================
-# CARREGAR CONTROLE PARA VER SEMANA ATIVA E HISTÓRICO
+# SEÇÃO DE GERENCIAMENTO DE USUÁRIOS (MELHORADA)
+# =====================================================
+st.subheader("👥 Gerenciamento de Usuários")
+
+# Usando tabs para melhor organização
+tab1, tab2 = st.tabs(["📝 Cadastrar Novo Usuário", "🗑️ Gerenciar Usuários Existentes"])
+
+with tab1:
+    st.write("Cadastre novos usuários para acesso ao sistema")
+    
+    with st.form(key="form_cadastro_usuario"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_username = st.text_input("Nome de usuário", key="new_user")
+        with col2:
+            new_password = st.text_input("Senha", type="password", key="new_pass")
+        
+        user_role = st.selectbox("Tipo de usuário", ["gerente", "admin"], index=0)
+        
+        if st.form_submit_button("Cadastrar Usuário"):
+            if not new_username or not new_password:
+                st.warning("Preencha todos os campos")
+            else:
+                with st.spinner("Cadastrando usuário..."):
+                    success, message = add_user(new_username, new_password, user_role)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+
+with tab2:
+    st.write("Gerencie os usuários existentes no sistema")
+    
+    try:
+        df_users = load_users()
+        
+        if not df_users.empty:
+            st.markdown("<div class='user-table'>", unsafe_allow_html=True)
+            
+            # Mostrar tabela de usuários (sem mostrar as senhas)
+            edited_df = st.data_editor(
+                df_users[["username", "role", "created_at"]].rename(columns={
+                    "username": "Usuário",
+                    "role": "Tipo",
+                    "created_at": "Data de Criação"
+                }),
+                use_container_width=True,
+                height=300,
+                disabled=["Usuário", "Tipo", "Data de Criação"],
+                hide_index=True
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Seção para remover usuário
+            st.write("### Remover Usuário")
+            user_to_delete = st.selectbox(
+                "Selecione o usuário para remover:",
+                df_users["username"].values,
+                key="user_to_delete"
+            )
+            
+            if st.button("Remover Usuário", key="delete_user"):
+                with st.spinner("Removendo usuário..."):
+                    success, message = delete_user(user_to_delete)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+        else:
+            st.info("Nenhum usuário cadastrado no momento.")
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {str(e)}")
+
+# =====================================================
+# CARREGAR CONTROLE PARA SEMANA ATIVA E HISTÓRICO
 # =====================================================
 try:
     df_controle = baixar_aba_excel("Controle")
@@ -244,4 +414,4 @@ if st.sidebar.button("🔄 Recarregar dados"):
         f'<div class="sidebar-timer">Tempo de recarregamento: {reload_time:.2f} segundos</div>',
         unsafe_allow_html=True
     )
-    st.experimental_rerun()
+    st.rerun()

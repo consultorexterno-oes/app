@@ -4,6 +4,7 @@ import time
 import sys
 import os
 from io import BytesIO
+import hashlib
 
 # Ajuste de path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -11,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from configuracoes.config import COLUNAS_ID, COLUNAS_MESES
 from entrada_saida.funcoes_io import carregar_previsto, salvar_base_dados, salvar_em_aba
 from api.graph_api import carregar_semana_ativa
+from api.graph_api import load_users
 
 # ============================
 # Cores e estilo
@@ -84,14 +86,22 @@ if "autenticado" not in st.session_state:
 
 if not st.session_state.autenticado:
     st.subheader("🔐 Acesso restrito")
-    senha = st.text_input("Digite a senha para entrar:", type="password")
+    username_input = st.text_input("Digite o nome de usuário:")
+    password_input = st.text_input("Digite a senha:", type="password")
 
-    if senha == "Narota27":
-        st.session_state.autenticado = True
-        st.success("✅ Acesso liberado! Aguarde o carregamento do sistema...")
-        st.rerun()
-    elif senha != "":
-        st.error("❌ Senha incorreta.")
+    if st.button("Entrar"):
+        df_users = load_users()
+        user = df_users[df_users["username"] == username_input]
+        
+        if user.empty:
+            st.error("❌ Usuário não encontrado.")
+        else:
+            if hashlib.sha256(password_input.encode()).hexdigest() == user["password_hash"].iloc[0]:
+                st.session_state.autenticado = True
+                st.success("✅ Acesso liberado!")
+                st.rerun()
+            else:
+                st.error("❌ Senha incorreta.")
     st.stop()
 
 # ============================
@@ -179,7 +189,6 @@ else:
 # ============================
 # Lógica de edição
 # ============================
-
 VALORES_ANALISE = [
     "RECEITA MAO DE OBRA",
     "RECEITA LOCAÇÃO",
@@ -190,7 +199,7 @@ VALORES_ANALISE = [
 ]
 
 # Filtrar dados da semana ativa
-df_semana = st.session_state.df_previsto[
+df_semana = st.session_state.df_previsto[ 
     (st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) &
     (st.session_state.df_previsto["Análise de emissão"].isin(VALORES_ANALISE))
 ].copy()
@@ -286,8 +295,8 @@ with col_edit3:
 col_edit4, col_edit5 = st.columns(2)
 with col_edit4:
     area_edit = st.selectbox("Área para edição",
-                           df_semana[
-                               (df_semana["Gerência"] == gerencia_edit) &
+                           df_semana[ 
+                               (df_semana["Gerência"] == gerencia_edit) & 
                                (df_semana["Complexo"] == complexo_edit)
                            ]["Área"].dropna().unique(),
                            key="area_edit")

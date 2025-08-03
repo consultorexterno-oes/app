@@ -1,5 +1,8 @@
 import pandas as pd
 import streamlit as st
+import time
+import requests
+
 from configuracoes.config import COLUNAS_ID, COLUNAS_MESES
 from api.graph_api import (
     baixar_aba_excel,
@@ -25,6 +28,26 @@ def carregar_refinado(_, colunas_id, colunas_meses):
     except Exception:
         return pd.DataFrame(columns=colunas_id + ["Mes", "Valor", "Semana"])
 
+# Função auxiliar para retry em salvamento
+def _tentar_salvar(func, tentativas=5, delay_inicial=3):
+    """
+    Executa função de salvamento com tentativas automáticas em caso de erro 423 (Locked).
+    """
+    for tentativa in range(tentativas):
+        try:
+            return func()
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 423:
+                espera = delay_inicial + tentativa * 2
+                st.warning(f"Arquivo bloqueado (423). Tentando novamente em {espera}s... (tentativa {tentativa+1}/{tentativas})")
+                time.sleep(espera)
+                continue
+            raise
+        except Exception as e:
+            # Outros erros não relacionados a lock, parar imediatamente
+            raise e
+    raise Exception(f"Não foi possível salvar após {tentativas} tentativas (arquivo bloqueado).")
+
 # 💾 Salva na aba "Base de Dados"
 def salvar_base_dados(df, append=False):
     """
@@ -33,31 +56,30 @@ def salvar_base_dados(df, append=False):
     - Se append=True: baixa a aba existente, concatena com o novo df e salva.
     """
     if not append:
-        # Salva sobrescrevendo tudo (comportamento atual)
-        salvar_apenas_aba("Base de Dados", df)
+        # Salva sobrescrevendo tudo (com retry)
+        _tentar_salvar(lambda: salvar_apenas_aba("Base de Dados", df))
     else:
-        # Salva apenas novas linhas (incremental)
-        try:
-            # Baixa dados atuais
+        # Salva apenas novas linhas (incremental) com retry
+        def salvar_incremental():
             sheets = baixar_arquivo_excel()
             if "Base de Dados" in sheets:
                 df_existente = sheets["Base de Dados"]
                 df_final = pd.concat([df_existente, df], ignore_index=True)
             else:
                 df_final = df
-
-            # Salva de volta
             sheets["Base de Dados"] = df_final
             salvar_arquivo_excel_modificado(sheets)
-        except Exception as e:
-            st.error(f"Erro ao salvar incrementalmente na aba 'Base de Dados': {e}")
-            raise
+
+        _tentar_salvar(salvar_incremental)
 
 # 💾 Salva na aba "Refinado"
 def salvar_refinado(df, _):
-    sheets = baixar_arquivo_excel()
-    sheets["Refinado"] = df
-    salvar_arquivo_excel_modificado(sheets)
+    def salvar():
+        sheets = baixar_arquivo_excel()
+        sheets["Refinado"] = df
+        salvar_arquivo_excel_modificado(sheets)
+
+    _tentar_salvar(salvar)
 
 # 🔄 Aplica alterações editadas pelo usuário
 def aplicar_alteracoes(df_existente, df_edicoes):
@@ -83,15 +105,12 @@ def salvar_semana_ativa(semana):
 
 # 📄 Salva o DataFrame fornecido em uma aba específica do Excel
 def salvar_em_aba(df, aba="Histórico"):
-    try:
+    def salvar():
         sheets = baixar_arquivo_excel()
-
         if aba in sheets:
             sheets[aba] = pd.concat([sheets[aba], df], ignore_index=True)
         else:
             sheets[aba] = df
-
         salvar_arquivo_excel_modificado(sheets)
-    except Exception as e:
-        st.error(f"Erro ao salvar na aba '{aba}': {e}")
-        raise
+
+    _tentar_salvar(salvar)

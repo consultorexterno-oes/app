@@ -4,7 +4,7 @@ import time
 import sys
 import os
 from io import BytesIO
-import hashlib
+from datetime import datetime
 
 # Ajuste de path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -12,7 +12,6 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from configuracoes.config import COLUNAS_ID, COLUNAS_MESES
 from entrada_saida.funcoes_io import carregar_previsto, salvar_base_dados, salvar_em_aba
 from api.graph_api import carregar_semana_ativa
-from api.graph_api import load_users
 
 # ============================
 # Cores e estilo
@@ -79,29 +78,22 @@ st.image("assets/Logo Rota 27.png", width=400)
 st.title("Refinado Semanal - Preenchimento")
 
 # ============================
-# Autenticação
+# Autenticação (senha única)
 # ============================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
     st.subheader("🔐 Acesso restrito")
-    username_input = st.text_input("Digite o nome de usuário:")
     password_input = st.text_input("Digite a senha:", type="password")
 
     if st.button("Entrar"):
-        df_users = load_users()
-        user = df_users[df_users["username"] == username_input]
-        
-        if user.empty:
-            st.error("❌ Usuário não encontrado.")
+        if password_input == "Narota27":
+            st.session_state.autenticado = True
+            st.success("✅ Acesso liberado!")
+            st.rerun()
         else:
-            if hashlib.sha256(password_input.encode()).hexdigest() == user["password_hash"].iloc[0]:
-                st.session_state.autenticado = True
-                st.success("✅ Acesso liberado!")
-                st.rerun()
-            else:
-                st.error("❌ Senha incorreta.")
+            st.error("❌ Senha incorreta.")
     st.stop()
 
 # ============================
@@ -131,60 +123,53 @@ else:
     st.sidebar.info("📅 Usando dados do cache (clique em 'Recarregar dados' para atualizar)")
 
 # ============================
-# Carregar e validar semana ativa
+# Carregar e sincronizar semana ativa
 # ============================
-if "semana_nova" not in st.session_state:
-    try:
-        semana_info = carregar_semana_ativa()
+try:
+    # Sempre busca a semana do Controle
+    semana_info = carregar_semana_ativa()
 
-        if not semana_info:
-            st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
-            st.stop()
-
-        semana_controle = semana_info.get("semana", "")
-        meses_controle = semana_info.get("meses_permitidos", [])
-
-        # Validar com base carregada
-        revisoes_disponiveis = sorted(st.session_state.df_previsto["Revisão"].dropna().unique())
-
-        if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
-            # Corrigir para última válida
-            semana_corrigida = revisoes_disponiveis[-1]
-            st.sidebar.warning(
-                f"A semana '{semana_controle}' não existe mais. Usando '{semana_corrigida}' como ativa."
-            )
-
-            st.session_state.semana_nova = semana_corrigida
-            st.session_state.meses_permitidos_admin = meses_controle
-
-            # Atualizar aba Controle automaticamente
-            df_controle_corrigido = pd.DataFrame({
-                "Semana Ativa": [semana_corrigida],
-                "Meses Permitidos": [";".join(meses_controle)]
-            })
-            try:
-                salvar_em_aba(df_controle_corrigido, aba="Controle")
-                st.sidebar.info("Controle atualizado automaticamente com a nova semana ativa.")
-            except Exception as e:
-                st.sidebar.error("Erro ao atualizar Controle com semana corrigida.")
-                st.exception(e)
-        else:
-            # Semana válida
-            st.session_state.semana_nova = semana_controle
-            st.session_state.meses_permitidos_admin = meses_controle
-
-        st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
-        if st.session_state.meses_permitidos_admin:
-            st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
-
-    except Exception as e:
-        st.sidebar.error("Erro ao carregar/validar semana ativa.")
-        st.exception(e)
+    if not semana_info:
+        st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
         st.stop()
-else:
+
+    semana_controle = semana_info.get("semana", "")
+    meses_controle = semana_info.get("meses_permitidos", [])
+
+    # Validar com base prevista
+    revisoes_disponiveis = sorted(st.session_state.df_previsto["Revisão"].dropna().unique())
+
+    if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
+        # Corrigir automaticamente para última válida
+        semana_corrigida = revisoes_disponiveis[-1]
+        st.sidebar.warning(
+            f"A semana '{semana_controle}' não existe mais na base. Usando '{semana_corrigida}' como ativa."
+        )
+
+        df_corrigido = pd.DataFrame({
+            "Semana Ativa": [semana_corrigida],
+            "Meses Permitidos": [";".join(meses_controle)],
+            "semana": [semana_corrigida],
+            "meses_permitidos": [str(meses_controle)],
+            "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+        })
+        salvar_em_aba(df_corrigido, aba="Controle")
+
+        st.session_state.semana_nova = semana_corrigida
+        st.session_state.meses_permitidos_admin = meses_controle
+    else:
+        # Semana do Controle é válida
+        st.session_state.semana_nova = semana_controle
+        st.session_state.meses_permitidos_admin = meses_controle
+
     st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
     if st.session_state.meses_permitidos_admin:
         st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
+
+except Exception as e:
+    st.sidebar.error("Erro ao carregar/validar semana ativa.")
+    st.exception(e)
+    st.stop()
 
 # ============================
 # Lógica de edição
@@ -199,7 +184,7 @@ VALORES_ANALISE = [
 ]
 
 # Filtrar dados da semana ativa
-df_semana = st.session_state.df_previsto[ 
+df_semana = st.session_state.df_previsto[
     (st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) &
     (st.session_state.df_previsto["Análise de emissão"].isin(VALORES_ANALISE))
 ].copy()
@@ -295,7 +280,7 @@ with col_edit3:
 col_edit4, col_edit5 = st.columns(2)
 with col_edit4:
     area_edit = st.selectbox("Área para edição",
-                           df_semana[ 
+                           df_semana[
                                (df_semana["Gerência"] == gerencia_edit) & 
                                (df_semana["Complexo"] == complexo_edit)
                            ]["Área"].dropna().unique(),

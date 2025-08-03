@@ -9,22 +9,21 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from entrada_saida.funcoes_io import carregar_previsto
 from api.graph_api import carregar_meses_permitidos
-from transformacao.funcoes_auxiliares import calcular_todos_indicadores
 
 # ============================
-# Configuração de Cores (Manual)
+# Configuração de Cores
 # ============================
-bg_color = "#FFFFFF"  # Cor de fundo
-fg_color = "#000000"  # Cor do texto
-accent_color = "#033347"  # Cor de destaque
-paleta_graficos = ["#033347", "#E2725B", "#4CAF50", "#2196F3"]  # Paleta de cores para gráficos
+bg_color = "#FFFFFF"
+fg_color = "#000000"
+accent_color = "#033347"
+paleta_graficos = ["#033347", "#E2725B", "#4CAF50", "#2196F3"]
 
 # ============================
 # Configuração da página
 # ============================
 st.set_page_config(page_title="Análises", layout="wide")
 
-# Aplicar CSS com tema
+# CSS customizado
 st.markdown(
     f"""
     <style>
@@ -51,11 +50,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Exibir logo
-st.image("assets/Logo Rota 27.png", width=400)
-st.subheader("📈 Análise Comparativa entre Semanas")
-
-# --- Tela de login simples ---
+# ============================
+# Login simples
+# ============================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
@@ -71,7 +68,9 @@ if not st.session_state.autenticado:
         st.error("❌ Senha incorreta.")
     st.stop()
 
-# --- Carregar dados ---
+# ============================
+# Carregar dados
+# ============================
 if "df_previsto" not in st.session_state:
     try:
         with st.spinner("📊 Carregando dados para análise..."):
@@ -86,29 +85,16 @@ df = st.session_state.df_previsto
 meses_permitidos_admin = st.session_state.get("meses_permitidos", [])
 
 # ============================
-# Filtros de Análise
+# Filtros
 # ============================
 st.sidebar.subheader("🔍 Filtros de Análise")
 
 # Filtros hierárquicos
-gerencias_disponiveis = df["Gerência"].dropna().unique()
-gerencia_selecionada = st.sidebar.selectbox("Gerência", options=gerencias_disponiveis)
-
-complexos_disponiveis = df[df["Gerência"] == gerencia_selecionada]["Complexo"].dropna().unique()
-complexo_selecionado = st.sidebar.selectbox("Complexo", options=complexos_disponiveis)
-
-areas_disponiveis = df[
-    (df["Gerência"] == gerencia_selecionada) &
-    (df["Complexo"] == complexo_selecionado)
-]["Área"].dropna().unique()
-area_selecionada = st.sidebar.selectbox("Área", options=areas_disponiveis)
-
-# Novos filtros
-classificacoes_disponiveis = df["Classificação"].dropna().unique()
-classificacao_selecionada = st.sidebar.selectbox("Classificação", options=classificacoes_disponiveis)
-
-cenarios_disponiveis = df["Cenário"].dropna().unique()
-cenario_selecionado = st.sidebar.selectbox("Cenário", options=cenarios_disponiveis)
+gerencia = st.sidebar.selectbox("Gerência", options=df["Gerência"].dropna().unique())
+complexo = st.sidebar.selectbox("Complexo", options=df[df["Gerência"] == gerencia]["Complexo"].dropna().unique())
+area = st.sidebar.selectbox("Área", options=df[(df["Gerência"] == gerencia) & (df["Complexo"] == complexo)]["Área"].dropna().unique())
+classificacao = st.sidebar.selectbox("Classificação", options=df["Classificação"].dropna().unique())
+cenario = st.sidebar.selectbox("Cenário", options=df["Cenário"].dropna().unique())
 
 # Seleção de semanas
 todas_semanas = sorted(df["Revisão"].dropna().unique())
@@ -118,7 +104,7 @@ semanas_selecionadas = st.sidebar.multiselect(
     default=todas_semanas[-2:] if len(todas_semanas) >= 2 else todas_semanas
 )
 
-# Opções de indicadores agregados
+# Seleção de indicadores
 OPCOES_AGREGADAS = [
     "Receita Bruta Total",
     "Impostos sobre Receita",
@@ -129,12 +115,11 @@ OPCOES_AGREGADAS = [
 analises_selecionadas = st.sidebar.multiselect(
     "Selecione as análises (indicadores agregados)",
     options=OPCOES_AGREGADAS,
-    default=["Receita Bruta Total", "Lucro Bruto (MC)"]
+    default=["Receita Bruta Total"]
 )
 
-# Se nenhuma análise for selecionada
 if not analises_selecionadas:
-    st.warning("⚠️ Selecione pelo menos um indicador em **'Selecione as análises (indicadores agregados)'** para visualizar os gráficos.")
+    st.warning("⚠️ Selecione pelo menos um indicador.")
     st.stop()
 
 # Seleção de meses
@@ -142,12 +127,11 @@ colunas_meses = [
     col for col in df.columns
     if pd.notnull(pd.to_datetime(col, errors="coerce", dayfirst=True))
 ]
+
 if meses_permitidos_admin:
     meses_disponiveis = [m for m in colunas_meses if m in meses_permitidos_admin]
-    st.sidebar.info(f"{len(meses_disponiveis)} meses disponíveis para edição")
 else:
     meses_disponiveis = colunas_meses
-    st.sidebar.warning("Todos os meses disponíveis (nenhum filtro aplicado)")
 
 meses_selecionados = st.sidebar.multiselect(
     "Selecione os meses para análise",
@@ -156,122 +140,90 @@ meses_selecionados = st.sidebar.multiselect(
 )
 
 # ============================
-# Processamento dos indicadores
+# Filtrar dados
 # ============================
 df_filtrado = df[
     (df["Revisão"].isin(semanas_selecionadas)) &
-    (df["Gerência"] == gerencia_selecionada) &
-    (df["Complexo"] == complexo_selecionado) &
-    (df["Área"] == area_selecionada) &
-    (df["Classificação"] == classificacao_selecionada) &
-    (df["Cenário"] == cenario_selecionado)
+    (df["Gerência"] == gerencia) &
+    (df["Complexo"] == complexo) &
+    (df["Área"] == area) &
+    (df["Classificação"] == classificacao) &
+    (df["Cenário"] == cenario)
 ]
 
 if df_filtrado.empty:
     st.warning("Nenhum dado encontrado com os filtros selecionados")
     st.stop()
 
-# Calcula todos indicadores agregados
-indicadores = calcular_todos_indicadores(df_filtrado)
+# Somente meses selecionados
+df_valores = df_filtrado[["Revisão"] + meses_selecionados].copy()
 
-# Filtra apenas os indicadores escolhidos pelo usuário
-dados_plot = pd.DataFrame([
-    {"Indicador": nome, "Valor": indicadores[nome + " (R$)"]}
-    for nome in analises_selecionadas
-])
+# Converter valores para numérico e somar
+df_valores[meses_selecionados] = df_valores[meses_selecionados].apply(pd.to_numeric, errors="coerce").fillna(0)
+
+# Agrupar por semana e somar
+df_agrupado = df_valores.groupby("Revisão")[meses_selecionados].sum()
+
+# Totalizar meses para cada semana
+df_agrupado["Total"] = df_agrupado.sum(axis=1)
 
 # ============================
-# Gráficos
+# Plot - Comparativo por Análise
 # ============================
 tab1, tab2, tab3 = st.tabs(["Comparativo por Análise", "Comparativo por Mês", "Dados Detalhados"])
 
-# --- TAB 1: Comparativo por Análise ---
 with tab1:
-    st.subheader(f"Comparativo por Indicadores - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
+    st.subheader(f"Comparativo - {gerencia} > {complexo} > {area}")
 
-    if not meses_selecionados:
-        st.warning("Selecione pelo menos um mês para análise")
-    else:
-        # Apenas gráfico com os indicadores agregados selecionados
-        fig1 = px.bar(
-            dados_plot,
-            x="Indicador",
-            y="Valor",
-            text_auto=True,
-            height=500,
-            color_discrete_sequence=paleta_graficos,
-            title=f"Indicadores agregados (Meses selecionados: {len(meses_selecionados)})"
-        )
-        fig1.update_traces(
-            texttemplate="R$ %{y:,.2f}",
-            hovertemplate="Indicador: %{x}<br>Valor: R$ %{y:,.2f}<extra></extra>"
-        )
-        fig1.update_layout(
-            xaxis_title="Indicador",
-            yaxis_title="Valor Total (R$)",
-            yaxis_tickformat=","
-        )
+    dados_plot = df_agrupado.reset_index()
 
-        st.plotly_chart(fig1, use_container_width=True)
-
-# --- TAB 2: Comparativo por Mês ---
-with tab2:
-    st.subheader(f"Evolução Mensal por Indicadores - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
-    st.info("""
-    Evolução mês a mês dos valores dos indicadores agregados selecionados.
-    """)
-
-    if not meses_selecionados:
-        st.warning("Selecione pelo menos um mês para visualizar este gráfico")
-    else:
-        # Montar DataFrame mensal com os indicadores agregados
-        df_mes = []
-        for indicador in analises_selecionadas:
-            valor = indicadores[indicador + " (R$)"]
-            for mes in meses_selecionados:
-                df_mes.append({
-                    "Indicador": indicador,
-                    "Mês": pd.to_datetime(mes, dayfirst=True).strftime("%b/%Y"),
-                    "Valor": valor
-                })
-        df_mes = pd.DataFrame(df_mes)
-
-        fig2 = px.bar(
-            df_mes,
-            x="Mês",
-            y="Valor",
-            color="Indicador",
-            barmode="group",
-            height=800,
-            color_discrete_sequence=paleta_graficos,
-            title="Evolução Mensal dos Indicadores"
-        )
-        fig2.update_traces(
-            texttemplate="R$ %{y:,.2f}",
-            hovertemplate="Mês: %{x}<br>Indicador: %{color}<br>Valor: R$ %{y:,.2f}<extra></extra>"
-        )
-        fig2.update_layout(
-            hovermode="x unified",
-            yaxis_title="Valor (R$)",
-            yaxis_tickformat=","
-        )
-
-        st.plotly_chart(fig2, use_container_width=True)
-
-# --- TAB 3: Dados Detalhados ---
-with tab3:
-    st.subheader(f"Dados Detalhados - {gerencia_selecionada} > {complexo_selecionado} > {area_selecionada}")
-    st.dataframe(
-        df_filtrado.sort_values(["Revisão"]),
-        use_container_width=True,
-        height=600
+    fig = px.bar(
+        dados_plot,
+        x="Revisão",
+        y="Total",
+        text_auto=True,
+        color_discrete_sequence=paleta_graficos,
+        title=f"Comparativo de {', '.join(analises_selecionadas)} (Meses selecionados: {len(meses_selecionados)})"
     )
+    fig.update_traces(texttemplate="R$ %{y:,.2f}")
+    fig.update_layout(yaxis_title="Valor Total (R$)")
 
-# --- Botão recarregar ---
+    st.plotly_chart(fig, use_container_width=True)
+
+# ============================
+# Plot - Comparativo por Mês
+# ============================
+with tab2:
+    st.subheader(f"Evolução Mensal - {gerencia} > {complexo} > {area}")
+
+    df_mes = df_valores.melt(id_vars=["Revisão"], var_name="Mês", value_name="Valor")
+    df_mes["Mês"] = pd.to_datetime(df_mes["Mês"], dayfirst=True).dt.strftime("%b/%Y")
+
+    fig2 = px.bar(
+        df_mes,
+        x="Mês",
+        y="Valor",
+        color="Revisão",
+        barmode="group",
+        color_discrete_sequence=paleta_graficos,
+        title="Evolução Mensal por Semana"
+    )
+    fig2.update_traces(texttemplate="R$ %{y:,.2f}")
+    fig2.update_layout(yaxis_title="Valor (R$)")
+
+    st.plotly_chart(fig2, use_container_width=True)
+
+# ============================
+# Tab - Dados Detalhados
+# ============================
+with tab3:
+    st.subheader("Dados Detalhados")
+    st.dataframe(df_filtrado, use_container_width=True, height=600)
+
+# Botão recarregar
 if st.sidebar.button("🔄 Recarregar dados"):
     st.cache_data.clear()
-    if "df_previsto" in st.session_state:
-        del st.session_state["df_previsto"]
-    if "meses_permitidos" in st.session_state:
-        del st.session_state["meses_permitidos"]
+    for key in ["df_previsto", "meses_permitidos"]:
+        if key in st.session_state:
+            del st.session_state[key]
     st.rerun()

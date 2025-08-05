@@ -109,7 +109,7 @@ if st.sidebar.button("🔄 Recarregar dados"):
 # ============================
 # Carregar dados de previsão
 # ============================
-@st.cache_data
+@st.cache_data(ttl=600)  # cache por 10 minutos (600 segundos)
 def carregar_dados_previsto():
     try:
         start_base = time.time()
@@ -130,7 +130,7 @@ else:
 # ============================
 # Carregar e sincronizar semana ativa
 # ============================
-@st.cache_data
+@st.cache_data(ttl=600)
 def carregar_semana():
     try:
         semana_info = carregar_semana_ativa()
@@ -184,8 +184,8 @@ VALORES_ANALISE = [
 ]
 
 # Filtrar dados da semana ativa
-df_semana = st.session_state.df_previsto[
-    (st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) & 
+df_semana = st.session_state.df_previsto[(
+    st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) & 
     (st.session_state.df_previsto["Análise de emissão"].isin(VALORES_ANALISE))
 ].copy()
 
@@ -310,11 +310,11 @@ meses_display = {
 mes_edit = st.selectbox("Mês para edição", options=meses_disponiveis, format_func=lambda x: meses_display[x], key="mes_edit")
 
 # Valor atual
-linhas_filtradas_edit = df_semana[
-    (df_semana["Classificação"] == coligada_edit) &
-    (df_semana["Gerência"] == gerencia_edit) &
-    (df_semana["Complexo"] == complexo_edit) &
-    (df_semana["Área"] == area_edit) &
+linhas_filtradas_edit = df_semana[(
+    df_semana["Classificação"] == coligada_edit) & 
+    (df_semana["Gerência"] == gerencia_edit) & 
+    (df_semana["Complexo"] == complexo_edit) & 
+    (df_semana["Área"] == area_edit) & 
     (df_semana["Análise de emissão"] == analise_edit)
 ]
 
@@ -369,8 +369,8 @@ if st.session_state.edicoes:
                 valor = edicao["Novo Valor"]
                 df_semana.at[idx, coluna] = valor
 
-            df_antigas = st.session_state.df_previsto[
-                st.session_state.df_previsto["Revisão"] != st.session_state.semana_nova
+            df_antigas = st.session_state.df_previsto[(
+                st.session_state.df_previsto["Revisão"] != st.session_state.semana_nova)
             ].copy()
             df_final = pd.concat([df_antigas, df_semana], ignore_index=True)
             salvar_base_dados(df_final)

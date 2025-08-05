@@ -109,67 +109,67 @@ if st.sidebar.button("🔄 Recarregar dados"):
 # ============================
 # Carregar dados de previsão
 # ============================
-if "df_previsto" not in st.session_state:
+@st.cache_data
+def carregar_dados_previsto():
     try:
         start_base = time.time()
-        st.session_state.df_previsto = carregar_previsto(None)
+        df = carregar_previsto(None)
         elapsed_base = time.time() - start_base
         st.sidebar.info(f"📅 Previsão carregada em {elapsed_base:.2f}s")
+        return df
     except Exception as e:
         st.error("Erro ao carregar os dados do SharePoint.")
         st.exception(e)
         st.stop()
+
+if "df_previsto" not in st.session_state:
+    st.session_state.df_previsto = carregar_dados_previsto()
 else:
     st.sidebar.info("📅 Usando dados do cache (clique em 'Recarregar dados' para atualizar)")
 
 # ============================
 # Carregar e sincronizar semana ativa
 # ============================
-try:
-    # Sempre busca a semana do Controle
-    semana_info = carregar_semana_ativa()
-
-    if not semana_info:
-        st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
+@st.cache_data
+def carregar_semana():
+    try:
+        semana_info = carregar_semana_ativa()
+        if not semana_info:
+            st.sidebar.warning("Nenhuma semana ativa encontrada na aba 'Controle'.")
+            st.stop()
+        return semana_info
+    except Exception as e:
+        st.sidebar.error("Erro ao carregar/validar semana ativa.")
+        st.exception(e)
         st.stop()
 
-    semana_controle = semana_info.get("semana", "")
-    meses_controle = semana_info.get("meses_permitidos", [])
+semana_info = carregar_semana()
 
-    # Validar com base prevista
-    revisoes_disponiveis = sorted(st.session_state.df_previsto["Revisão"].dropna().unique())
+# Sincronização da semana ativa
+semana_controle = semana_info.get("semana", "")
+meses_controle = semana_info.get("meses_permitidos", [])
+revisoes_disponiveis = sorted(st.session_state.df_previsto["Revisão"].dropna().unique())
 
-    if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
-        # Corrigir automaticamente para última válida
-        semana_corrigida = revisoes_disponiveis[-1]
-        st.sidebar.warning(
-            f"A semana '{semana_controle}' não existe mais na base. Usando '{semana_corrigida}' como ativa."
-        )
+if semana_controle not in revisoes_disponiveis and revisoes_disponiveis:
+    semana_corrigida = revisoes_disponiveis[-1]
+    st.sidebar.warning(f"A semana '{semana_controle}' não existe mais na base. Usando '{semana_corrigida}' como ativa.")
+    df_corrigido = pd.DataFrame({
+        "Semana Ativa": [semana_corrigida],
+        "Meses Permitidos": [";".join(meses_controle)],
+        "semana": [semana_corrigida],
+        "meses_permitidos": [str(meses_controle)],
+        "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+    })
+    salvar_em_aba(df_corrigido, aba="Controle")
+    st.session_state.semana_nova = semana_corrigida
+    st.session_state.meses_permitidos_admin = meses_controle
+else:
+    st.session_state.semana_nova = semana_controle
+    st.session_state.meses_permitidos_admin = meses_controle
 
-        df_corrigido = pd.DataFrame({
-            "Semana Ativa": [semana_corrigida],
-            "Meses Permitidos": [";".join(meses_controle)],
-            "semana": [semana_corrigida],
-            "meses_permitidos": [str(meses_controle)],
-            "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
-        })
-        salvar_em_aba(df_corrigido, aba="Controle")
-
-        st.session_state.semana_nova = semana_corrigida
-        st.session_state.meses_permitidos_admin = meses_controle
-    else:
-        # Semana do Controle é válida
-        st.session_state.semana_nova = semana_controle
-        st.session_state.meses_permitidos_admin = meses_controle
-
-    st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
-    if st.session_state.meses_permitidos_admin:
-        st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
-
-except Exception as e:
-    st.sidebar.error("Erro ao carregar/validar semana ativa.")
-    st.exception(e)
-    st.stop()
+st.sidebar.success(f"✳️ Semana ativa: {st.session_state.semana_nova}")
+if st.session_state.meses_permitidos_admin:
+    st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
 
 # ============================
 # Lógica de edição
@@ -185,7 +185,7 @@ VALORES_ANALISE = [
 
 # Filtrar dados da semana ativa
 df_semana = st.session_state.df_previsto[
-    (st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) &
+    (st.session_state.df_previsto["Revisão"] == st.session_state.semana_nova) & 
     (st.session_state.df_previsto["Análise de emissão"].isin(VALORES_ANALISE))
 ].copy()
 

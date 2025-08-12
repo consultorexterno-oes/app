@@ -8,8 +8,14 @@ import time
 # Ajuste de path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-from entrada_saida.funcoes_io import carregar_previsto, salvar_em_aba
-from api.graph_api import baixar_aba_excel
+from entrada_saida.funcoes_io import (
+    carregar_previsto,
+    salvar_em_aba,
+    salvar_base_dados,
+    bump_version_token,
+    get_version_token,
+)
+from api.graph_api import baixar_aba_excel, salvar_apenas_aba, carregar_semana_ativa, salvar_aba_controle
 
 # =====================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -17,42 +23,23 @@ from api.graph_api import baixar_aba_excel
 st.set_page_config(page_title="Administração", layout="wide")
 
 # =====================================================
-# ESTILOS PERSONALIZADOS
+# ESTILOS
 # =====================================================
 st.markdown(
     """
     <style>
-    :root {
-        color-scheme: light !important;
-    }
-    body {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-    }
+    :root { color-scheme: light !important; }
+    body { background-color: #ffffff !important; color: #000000 !important; }
     [data-testid="stHeader"], [data-testid="stSidebar"] {
-        background-color: #ffffff !important;
-        color: #000000 !important;
+        background-color: #ffffff !important; color: #000000 !important;
     }
     .stButton>button {
-        background-color: #033347 !important;
-        color: white !important;
-        border-radius: 8px;
-        border: none;
-        padding: 0.5em 1em;
+        background-color: #033347 !important; color: white !important;
+        border-radius: 8px; border: none; padding: 0.5em 1em;
     }
-    .timer {
-        font-size: 0.9em;
-        color: #555;
-        margin-top: 5px;
-    }
-    .sidebar-timer {
-        font-size: 0.8em;
-        color: #666;
-        background: #f0f0f0;
-        padding: 5px;
-        border-radius: 4px;
-        margin-top: 10px;
-    }
+    .timer { font-size: 0.9em; color: #555; margin-top: 5px; }
+    .sidebar-timer { font-size: 0.8em; color: #666; background: #f0f0f0;
+        padding: 5px; border-radius: 4px; margin-top: 10px; }
     </style>
     """,
     unsafe_allow_html=True
@@ -62,7 +49,7 @@ st.markdown(
 # LOGO E TÍTULO
 # =====================================================
 st.image("assets/Logo Rota 27.png", width=300)
-st.title("⚙️ Painel do Administrador do App")
+st.title("Painel do Administrador do App")
 
 # =====================================================
 # AUTENTICAÇÃO SIMPLES (senha fixa)
@@ -71,74 +58,67 @@ if "autenticado_admin" not in st.session_state:
     st.session_state.autenticado_admin = False
 
 if not st.session_state.autenticado_admin:
-    st.subheader("🔐 Acesso restrito (Administrador)")
+    st.subheader("Acesso restrito (Administrador)")
     password_input = st.text_input("Digite a senha de administrador:", type="password")
-
     if st.button("Entrar"):
         if password_input == "adm_oes":
             st.session_state.autenticado_admin = True
-            st.success("✅ Acesso liberado!")
+            st.success("Acesso liberado!")
             st.rerun()
         else:
-            st.error("❌ Senha incorreta.")
+            st.error("Senha incorreta.")
     st.stop()
 
 # =====================================================
-# CARREGAR BASE DE DADOS
+# HELPERS
 # =====================================================
-if "df_previsto" not in st.session_state:
+def formatar_mes(mes_str: str) -> str:
     try:
-        start_time = time.time()
-        with st.spinner("📊 Carregando base de dados..."):
-            st.session_state.df_previsto = carregar_previsto(None)
-            load_time = time.time() - start_time
-            st.markdown(f'<div class="timer">Tempo de carregamento: {load_time:.2f} segundos</div>',
-                       unsafe_allow_html=True)
-    except Exception as e:
-        st.error("Erro ao carregar a base de dados.")
-        st.exception(e)
-        st.stop()
+        return pd.to_datetime(mes_str, dayfirst=True).strftime("%B %Y").capitalize()
+    except Exception:
+        return str(mes_str)
 
-df_previsto = st.session_state.df_previsto
+def obter_df_previsto_uma_vez() -> pd.DataFrame:
+    if "df_previsto_admin" not in st.session_state:
+        t0 = time.time()
+        with st.spinner("Carregando base de dados..."):
+            st.session_state.df_previsto_admin = carregar_previsto(get_version_token())
+        st.markdown(
+            f'<div class="timer">Tempo de carregamento: {time.time() - t0:.2f} s</div>',
+            unsafe_allow_html=True
+        )
+    return st.session_state.df_previsto_admin
 
 # =====================================================
-# CARREGAR CONTROLE PARA SEMANA ATIVA E HISTÓRICO
+# CARREGAR BASE DE DADOS (1x por sessão)
 # =====================================================
-try:
-    df_controle = baixar_aba_excel("Controle")
-except Exception:
-    df_controle = pd.DataFrame(columns=["Semana Ativa", "Meses Permitidos", "semana", "meses_permitidos", "data_criacao"])
+df_previsto = obter_df_previsto_uma_vez()
 
-# Obter semana ativa atual
-semana_ativa_atual = df_controle["Semana Ativa"].iloc[0] if not df_controle.empty else None
+# =====================================================
+# CARREGAR CONTROLE (apenas leitura, 1x por sessão por token)
+# =====================================================
+dados_controle = carregar_semana_ativa(version_token=get_version_token()) or {}
+semana_ativa_atual = dados_controle.get("semana")
+meses_permitidos_atuais = dados_controle.get("meses_permitidos", [])
 
 # =====================================================
 # SELECIONAR REVISÃO PARA DUPLICAR
 # =====================================================
-st.subheader("📌 Escolha a Revisão para duplicar")
+st.subheader("Criar nova semana a partir de uma Revisão existente")
 
-revisoes_disponiveis = sorted(df_previsto["Revisão"].dropna().unique())
+revisoes_disponiveis = sorted(df_previsto["Revisão"].dropna().unique().tolist())
 revisao_origem = st.selectbox("Revisão (origem dos dados)", revisoes_disponiveis)
 
 nome_nova_semana = st.text_input("Nome da nova semana", placeholder="Ex: Semana 37")
 
-# =====================================================
-# SELECIONAR MESES LIBERADOS
-# =====================================================
-st.subheader("📅 Selecione os meses que os gerentes poderão refinar")
+# Colunas de meses (precomputadas uma vez)
+if "admin_colunas_meses" not in st.session_state:
+    st.session_state.admin_colunas_meses = [
+        c for c in df_previsto.columns
+        if pd.notnull(pd.to_datetime(c, errors="coerce", dayfirst=True))
+    ]
 
-# Identificar colunas que são meses
-colunas_meses = [
-    col for col in df_previsto.columns
-    if pd.notnull(pd.to_datetime(col, errors="coerce", dayfirst=True))
-]
-
-# Função para exibir nome de mês e ano
-def formatar_mes(mes_str):
-    try:
-        return pd.to_datetime(mes_str, dayfirst=True).strftime("%B %Y").capitalize()
-    except Exception:
-        return mes_str
+colunas_meses = st.session_state.admin_colunas_meses
 
 meses_selecionados = st.multiselect(
     "Meses liberados para edição",
@@ -148,55 +128,54 @@ meses_selecionados = st.multiselect(
 )
 
 # =====================================================
-# CRIAR NOVA SEMANA (E DEFINIR COMO ATIVA)
+# CRIAR NOVA SEMANA (APPEND INCREMENTAL) + ATIVAR
 # =====================================================
-if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
+if st.button("Criar nova semana e ativar"):
     if not nome_nova_semana:
-        st.warning("Informe o nome da nova semana antes de prosseguir.")
+        st.warning("Informe o nome da nova semana.")
+    elif nome_nova_semana in revisoes_disponiveis:
+        st.warning("Esta semana já existe na base.")
     else:
         try:
-            start_time_total = time.time()
-            st.info("⏳ Iniciando criação da nova semana. Aguarde...")
+            t_total = time.time()
+            st.info("Iniciando criação e ativação da nova semana...")
 
-            # 1. Duplicar registros
-            etapa_inicio = time.time()
+            # 1) Duplicação em memória
+            t = time.time()
             df_nova = df_previsto[df_previsto["Revisão"] == revisao_origem].copy()
+            if df_nova.empty:
+                st.error("Revisão de origem sem linhas na base.")
+                st.stop()
             df_nova["Revisão"] = nome_nova_semana
-            tempo_duplicar = time.time() - etapa_inicio
+            tempo_dup = time.time() - t
 
-            # 2. Salvar base de dados com nova semana
-            etapa_inicio = time.time()
-            df_final = pd.concat([df_previsto, df_nova], ignore_index=True)
-            salvar_em_aba(df_final, aba="Base de Dados")
-            tempo_salvar_base = time.time() - etapa_inicio
+            # 2) Persistir de forma incremental (append)
+            t = time.time()
+            salvar_base_dados(df_nova, append=True)
+            tempo_salvar_base = time.time() - t
 
-            # 3. Atualizar aba Controle com nova semana ativa
-            etapa_inicio = time.time()
+            # 3) Atualizar Controle sobrescrevendo com única linha
+            t = time.time()
             df_controle_novo = pd.DataFrame({
                 "Semana Ativa": [nome_nova_semana],
                 "Meses Permitidos": [";".join(meses_selecionados)],
-                "semana": [nome_nova_semana],
-                "meses_permitidos": [str(meses_selecionados)],
-                "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
             })
-            salvar_em_aba(df_controle_novo, aba="Controle")
-            tempo_salvar_controle = time.time() - etapa_inicio
+            salvar_apenas_aba("Controle", df_controle_novo)
+            tempo_controle = time.time() - t
 
-            # Limpar cache para refletir no app
-            st.cache_data.clear()
-            if "df_previsto" in st.session_state:
-                del st.session_state["df_previsto"]
+            # 4) Atualizar estado local sem recarregar da origem
+            st.session_state.df_previsto_admin = pd.concat([df_previsto, df_nova], ignore_index=True)
 
-            tempo_total = time.time() - start_time_total
+            # 5) Bump do token para que outras páginas recarreguem quando precisarem
+            bump_version_token()
 
             st.success(
-                f"Semana **{nome_nova_semana}** criada e definida como ativa!\n\n"
-                f"- Duplicação: {tempo_duplicar:.2f}s\n"
-                f"- Salvamento base: {tempo_salvar_base:.2f}s\n"
-                f"- Atualização controle: {tempo_salvar_controle:.2f}s\n"
-                f"- Tempo total: {tempo_total:.2f}s"
+                f"Semana '{nome_nova_semana}' criada e ativada.\n"
+                f"- Duplicação: {tempo_dup:.2f}s | "
+                f"Persistência (append): {tempo_salvar_base:.2f}s | "
+                f"Controle: {tempo_controle:.2f}s | "
+                f"Total: {time.time() - t_total:.2f}s"
             )
-
         except Exception as e:
             st.error("Erro ao criar a nova semana.")
             st.exception(e)
@@ -204,65 +183,69 @@ if st.button("➕ Criar nova semana a partir da Revisão selecionada"):
 # =====================================================
 # ALTERAR SEMANA ATIVA MANUALMENTE
 # =====================================================
-st.subheader("🔄 Alterar Semana Ativa Manualmente")
+st.subheader("Alterar semana ativa manualmente")
 
-# Listar semanas criadas
-semanas_historico = df_controle["semana"].dropna().unique().tolist() if "semana" in df_controle.columns else []
+# Em vez de depender de histórico na aba Controle, usamos as Revisões existentes
+semanas_disponiveis = sorted(df_previsto["Revisão"].dropna().unique().tolist())
 
-if semanas_historico:
-    semana_escolhida = st.selectbox(
-        "Selecione a semana para ativar",
-        semanas_historico,
-        index=semanas_historico.index(semana_ativa_atual) if semana_ativa_atual in semanas_historico else 0
+col1, col2 = st.columns([2, 3])
+with col1:
+    idx_default = semanas_disponiveis.index(semana_ativa_atual) if semana_ativa_atual in semanas_disponiveis else 0
+    semana_escolhida = st.selectbox("Semana para ativar", semanas_disponiveis, index=idx_default)
+
+with col2:
+    meses_para_ativar = st.multiselect(
+        "Meses liberados ao ativar",
+        options=colunas_meses,
+        default=meses_permitidos_atuais if meses_permitidos_atuais else (colunas_meses[-6:] if colunas_meses else []),
+        format_func=formatar_mes,
+        key="meses_para_ativar"
     )
 
-    if st.button("Ativar Semana Selecionada"):
-        try:
-            meses_permitidos_semana = df_controle.loc[df_controle["semana"] == semana_escolhida, "meses_permitidos"].values
-            meses_formatados = meses_permitidos_semana[0] if len(meses_permitidos_semana) > 0 else ""
+if st.button("Ativar semana selecionada"):
+    try:
+        df_controle_ativo = pd.DataFrame({
+            "Semana Ativa": [semana_escolhida],
+            "Meses Permitidos": [";".join(meses_para_ativar)],
+        })
+        salvar_apenas_aba("Controle", df_controle_ativo)
 
-            df_controle_ativo = pd.DataFrame({
-                "Semana Ativa": [semana_escolhida],
-                "Meses Permitidos": [meses_formatados],
-                "semana": [semana_escolhida],
-                "meses_permitidos": [meses_formatados],
-                "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
-            })
-            salvar_em_aba(df_controle_ativo, aba="Controle")
+        # Atualiza token para forçar recarga apenas quando necessário
+        bump_version_token()
 
-            st.cache_data.clear()
-            st.success(f"Semana **{semana_escolhida}** definida como ativa!")
-        except Exception as e:
-            st.error("Erro ao ativar semana selecionada.")
-            st.exception(e)
-else:
-    st.info("Nenhuma semana disponível para ativação manual.")
+        st.success(f"Semana '{semana_escolhida}' definida como ativa.")
+    except Exception as e:
+        st.error("Erro ao ativar semana selecionada.")
+        st.exception(e)
 
 # =====================================================
-# VISUALIZAR BASE ATUAL
+# VISUALIZAÇÃO (rápida) DA BASE ATUAL
 # =====================================================
-st.subheader("📋 Base de Dados Atual (visualização)")
-start_render_time = time.time()
+st.subheader("Base de Dados atual (visualização)")
+
+t_render = time.time()
 st.dataframe(
     df_previsto.sort_values("Revisão"),
     use_container_width=True,
-    height=400
+    height=420
 )
-render_time = time.time() - start_render_time
-st.markdown(f'<div class="timer">Tempo de renderização: {render_time:.2f} segundos</div>',
-           unsafe_allow_html=True)
+st.markdown(
+    f'<div class="timer">Tempo de renderização: {time.time() - t_render:.2f} s</div>',
+    unsafe_allow_html=True
+)
 
 # =====================================================
-# BOTÃO DE RECARREGAR DADOS
+# BOTÃO DE RECARREGAR (soft reload via token)
 # =====================================================
-if st.sidebar.button("🔄 Recarregar dados"):
-    start_reload_time = time.time()
-    st.cache_data.clear()
-    if "df_previsto" in st.session_state:
-        del st.session_state["df_previsto"]
-    reload_time = time.time() - start_reload_time
+if st.sidebar.button("Recarregar dados da origem"):
+    t_reload = time.time()
+    bump_version_token()
     st.sidebar.markdown(
-        f'<div class="sidebar-timer">Tempo de recarregamento: {reload_time:.2f} segundos</div>',
+        f'<div class="sidebar-timer">Agendada nova leitura (token). {time.time() - t_reload:.2f} s</div>',
         unsafe_allow_html=True
     )
+    # Limpa apenas caches locais deste módulo
+    for k in ["df_previsto_admin", "admin_colunas_meses"]:
+        if k in st.session_state:
+            del st.session_state[k]
     st.rerun()

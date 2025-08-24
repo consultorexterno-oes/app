@@ -18,26 +18,13 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from configuracoes.config import COLUNAS_ID, COLUNAS_MESES
 from entrada_saida.funcoes_io import (
     carregar_previsto,
+    carregar_previsto_semana_ativa,
     salvar_base_dados,
     salvar_em_aba,
-    get_version_token,   # recarga suave
+    get_version_token,
 )
 
-# --- Import opcional: se existir, carrega só a semana ativa (muito mais leve)
-HAS_SEMANA_ATIVA_LOADER = False
-try:
-    from entrada_saida.funcoes_io import carregar_previsto_semana_ativa  # opcional
-    HAS_SEMANA_ATIVA_LOADER = True
-except Exception:
-    pass
-
-# ---- Import resiliente do Graph
-HAS_STEPWISE = False
-try:
-    from api.graph_api import carregar_semana_ativa, baixar_aba_excel_stepwise
-    HAS_STEPWISE = True
-except Exception:
-    from api.graph_api import carregar_semana_ativa
+from api.graph_api import carregar_semana_ativa
 
 # ============================
 # Cores e estilo
@@ -110,7 +97,7 @@ def init_state():
         "filtro_complexo": "Todos",
         "filtro_area": "Todos",
         "filtro_analise": "Todos",
-        "_boot_done": False,              # marca que o primeiro carregamento acabou
+        "_boot_done": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -126,7 +113,7 @@ st.title("Refinado Semanal - Preenchimento")
 st.subheader("🚧 Versão Beta: Aplicativo em desenvolvimento...")
 
 # ============================
-# Autenticação (senha única)
+# Autenticação
 # ============================
 if not st.session_state.autenticado:
     st.subheader("Acesso restrito")
@@ -141,45 +128,22 @@ if not st.session_state.autenticado:
     st.stop()
 
 # ============================
-# Carga inicial (1x) — com correção de semana inexistente
+# Função utilitária para filtrar Moderado
 # ============================
-def _corrigir_semana_inexistente(df_base: pd.DataFrame, semana_controle: str, meses_controle: list) -> tuple[str, pd.DataFrame]:
-    """
-    Se a semana do Controle não existir na base, corrige para a mais recente disponível
-    (ordem alfabética crescente → pega a última) e atualiza a aba 'Controle'.
-    """
-    revisoes_disponiveis = sorted(df_base["Revisão"].dropna().astype(str).unique().tolist()) if "Revisão" in df_base.columns else []
-    if revisoes_disponiveis and semana_controle not in revisoes_disponiveis:
-        semana_corrigida = revisoes_disponiveis[-1]
-        # Atualiza Controle para manter tudo sincronizado
-        df_corrigido = pd.DataFrame({
-            "Semana Ativa": [semana_corrigida],
-            "Meses Permitidos": [";".join(meses_controle or [])],
-            "semana": [semana_corrigida],
-            "meses_permitidos": [str(meses_controle or [])],
-            "data_criacao": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
-        })
-        try:
-            salvar_em_aba(df_corrigido, aba="Controle")
-        except Exception as e:
-            st.sidebar.error("Falha ao atualizar semana na aba Controle.")
-            st.exception(e)
-        return semana_corrigida, df_base[df_base["Revisão"] == semana_corrigida].copy()
-    # Semana existe → retorna base filtrada normalmente
-    return semana_controle, df_base[df_base["Revisão"] == semana_controle].copy()
+def _filtrar_moderado(df: pd.DataFrame) -> pd.DataFrame:
+    if "Cenário" not in df.columns:
+        return df
+    return df[df["Cenário"].str.casefold() == "moderado"].copy()
 
+# ============================
+# Carga inicial (1x)
+# ============================
 def _carregar_base_somente_uma_vez() -> pd.DataFrame:
-    """
-    Lê os dados 1x por sessão e guarda no session_state.
-    Tenta carregar apenas a semana ativa; se a semana do Controle não existir na base,
-    corrige para a mais recente automaticamente e atualiza o Controle.
-    """
     if st.session_state.df_previsto is not None:
         return st.session_state.df_previsto
 
     t0 = perf_counter()
 
-    # 1) Ler semana ativa do Controle (sempre do servidor)
     with st.spinner("Lendo semana ativa…"):
         semana_info = carregar_semana_ativa(version_token=get_version_token())
         if not semana_info:
@@ -190,80 +154,22 @@ def _carregar_base_somente_uma_vez() -> pd.DataFrame:
     semana_ativa = str(st.session_state.semana_info.get("semana", ""))
     meses_controle = st.session_state.semana_info.get("meses_permitidos", []) or []
 
-    # 2) Carregar dados da semana ativa — OU corrigir, se essa semana não existir mais
-    if HAS_SEMANA_ATIVA_LOADER:
-        # Carrega diretamente só a semana ativa
-        with st.spinner(f"Carregando dados da semana '{semana_ativa}'…"):
-            df = carregar_previsto_semana_ativa(get_version_token())
+    with st.spinner(f"Carregando dados da semana '{semana_ativa}'…"):
+        df = carregar_previsto_semana_ativa(get_version_token())
 
-        if df is None or df.empty:
-            # Semana do Controle não existe mais; carregar base completa (uma vez) para descobrir a mais recente
-            if HAS_STEPWISE:
-                with st.status("Semana do Controle não encontrada. Verificando base completa…", expanded=True) as status:
-                    def ui(msg: str):
-                        status.write(msg)
-                    status.update(label="Lendo 'Base de Dados'…", state="running")
-                    try:
-                        df_base = baixar_aba_excel_stepwise("Base de Dados", version_token=get_version_token(), on_update=ui)
-                        status.update(label="Corrigindo semana ativa…", state="running")
-                    except Exception as e:
-                        status.update(label="Falha ao carregar a base completa.", state="error")
-                        st.error("Erro ao carregar a aba 'Base de Dados'.")
-                        st.exception(e)
-                        st.stop()
-            else:
-                with st.spinner("Lendo 'Base de Dados'…"):
-                    df_base = carregar_previsto(get_version_token())
+    # Só mantém Moderado
+    df = _filtrar_moderado(df)
 
-            # Ajusta COLUNAS_MESES a partir da base completa
-            COLUNAS_MESES.clear
-            cols_meses_all = [c for c in df_base.columns if c not in COLUNAS_ID and pd.notnull(pd.to_datetime(c, errors="coerce", dayfirst=True))]
-            COLUNAS_MESES.extend(cols_meses_all)
+    # Ajusta meses
+    COLUNAS_MESES.clear()
+    cols_meses = [
+        c for c in df.columns
+        if c not in COLUNAS_ID and pd.notnull(pd.to_datetime(c, errors="coerce", dayfirst=True))
+    ]
+    COLUNAS_MESES.extend(cols_meses)
 
-            # Corrige semana e atualiza Controle
-            semana_ajustada, df_filtrado = _corrigir_semana_inexistente(df_base, semana_ativa, meses_controle)
-            st.session_state.semana_info["semana"] = semana_ajustada
-            st.session_state.semana_nova = semana_ajustada
-            df = df_filtrado
-        else:
-            # Ajusta COLUNAS_MESES (com base nos dados da semana)
-            COLUNAS_MESES.clear()
-            cols_meses = [c for c in df.columns if c not in COLUNAS_ID and pd.notnull(pd.to_datetime(c, errors="coerce", dayfirst=True))]
-            COLUNAS_MESES.extend(cols_meses)
-
-    else:
-        # Fallback: carrega a base (uma única vez) e filtra semana depois (com correção, se necessário)
-        if HAS_STEPWISE:
-            with st.status("Preparando leitura da 'Base de Dados'…", expanded=True) as status:
-                def ui(msg: str):
-                    status.write(msg)
-                status.update(label="Lendo planilha no SharePoint…", state="running")
-                try:
-                    df_base = baixar_aba_excel_stepwise("Base de Dados", version_token=get_version_token(), on_update=ui)
-                    status.update(label="Validando semana ativa…", state="running")
-                except Exception as e:
-                    status.update(label="Falha ao carregar a base.", state="error")
-                    st.error("Erro ao carregar a aba 'Base de Dados'.")
-                    st.exception(e)
-                    st.stop()
-        else:
-            with st.spinner("Lendo 'Base de Dados'…"):
-                df_base = carregar_previsto(get_version_token())
-
-        # Ajusta COLUNAS_MESES a partir da base completa
-        COLUNAS_MESES.clear()
-        cols_meses_all = [c for c in df_base.columns if c not in COLUNAS_ID and pd.notnull(pd.to_datetime(c, errors="coerce", dayfirst=True))]
-        COLUNAS_MESES.extend(cols_meses_all)
-
-        # Corrige semana se necessário
-        semana_ajustada, df = _corrigir_semana_inexistente(df_base, semana_ativa, meses_controle)
-        st.session_state.semana_info["semana"] = semana_ajustada
-        st.session_state.semana_nova = semana_ajustada
-
-    # Grava a base da semana ativa em sessão (única fonte para o app inteiro)
     st.session_state.df_previsto = df
-    if not st.session_state.semana_nova:
-        st.session_state.semana_nova = st.session_state.semana_info.get("semana", "")
+    st.session_state.semana_nova = semana_ativa
     st.session_state.meses_permitidos_admin = meses_controle
 
     st.sidebar.success(f"Carga inicial concluída em {perf_counter()-t0:.2f}s")
@@ -273,14 +179,14 @@ def _carregar_base_somente_uma_vez() -> pd.DataFrame:
 _carregar_base_somente_uma_vez()
 
 # ============================
-# Sincronização da semana ativa (sem I/O extra)
+# Sincronização da semana ativa
 # ============================
 st.sidebar.success(f"Semana ativa: {st.session_state.semana_nova}")
 if st.session_state.meses_permitidos_admin:
     st.sidebar.info(f"Meses permitidos: {len(st.session_state.meses_permitidos_admin)}")
 
 # ============================
-# Botão de recarregamento manual (raríssimo)
+# Botão recarregar manual
 # ============================
 def resetar_cache_e_estado():
     st.cache_data.clear()
@@ -299,7 +205,7 @@ if st.sidebar.button("Recarregar dados da origem"):
     st.rerun()
 
 # ============================
-# Preparação de dados da semana (só memória)
+# Preparação da semana (memória)
 # ============================
 VALORES_ANALISE = [
     "RECEITA MAO DE OBRA",
@@ -314,9 +220,7 @@ def preparar_df_semana(df_previsto: pd.DataFrame) -> pd.DataFrame:
     df = df_previsto[df_previsto["Análise de emissão"].isin(VALORES_ANALISE)].copy()
     if df.empty:
         return df
-    df["Análise de emissão"] = pd.Categorical(
-        df["Análise de emissão"], categories=VALORES_ANALISE, ordered=True
-    )
+    df["Análise de emissão"] = pd.Categorical(df["Análise de emissão"], categories=VALORES_ANALISE, ordered=True)
     df.sort_values("Análise de emissão", inplace=True)
     return df
 
@@ -419,7 +323,7 @@ df_filtrado = st.session_state.df_filtrado_cached if st.session_state.df_filtrad
 
 st.subheader(f"Valores atuais filtrados – {st.session_state.semana_nova}")
 
-# Preview leve (evita travar o front)
+# Preview leve
 total_linhas = len(df_filtrado)
 limite = st.session_state.limite_preview_linhas
 preview = df_filtrado.head(limite)
@@ -565,39 +469,23 @@ with salvar_col1:
                 if idx in df_semana.index and col in df_semana.columns:
                     df_semana.at[idx, col] = val
 
-            # df_previsto contém somente a semana ativa → basta salvar essa semana;
-            # funcoes_io.salvar_base_dados faz merge por 'Revisão', sem afetar outras semanas
-            df_final = df_semana.copy()
+            # 🔒 só salva Moderado
+            df_final = _filtrar_moderado(df_semana.copy())
             salvar_base_dados(df_final)
 
             # histórico
             salvar_em_aba(pd.DataFrame(st.session_state.edicoes), aba="Histórico")
 
-            # limpa estado de edições
+            # limpa estado
             st.session_state.df_previsto = df_final
             st.session_state.edicoes = []
             st.session_state.has_unsaved_changes = False
 
-            # atualiza caches locais
+            # atualiza caches
             st.session_state.df_semana_cached = preparar_df_semana(st.session_state.df_previsto)
             st.session_state.df_semana_cache_key = (id(st.session_state.df_previsto), st.session_state.semana_nova)
 
-            # re-filtra baseado no último conjunto de filtros
-            df_semana = st.session_state.df_semana_cached
-            df_filtrado = df_semana.copy()
-            if st.session_state.filtro_coligada != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Classificação"] == st.session_state.filtro_coligada]
-            if st.session_state.filtro_gerencia != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Gerência"] == st.session_state.filtro_gerencia]
-            if st.session_state.filtro_complexo != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Complexo"] == st.session_state.filtro_complexo]
-            if st.session_state.filtro_area != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Área"] == st.session_state.filtro_area]
-            if st.session_state.filtro_analise != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Análise de emissão"] == st.session_state.filtro_analise]
-            st.session_state.df_filtrado_cached = df_filtrado
-
-            st.success("Alterações salvas com sucesso.")
+            st.success("Alterações salvas com sucesso (somente Moderado).")
         except Exception as e:
             st.error("Erro ao salvar as alterações.")
             st.exception(e)

@@ -373,3 +373,23 @@ def baixar_aba_excel_stepwise(nome_aba: str, version_token: int = 0, on_update=N
     t6 = time.perf_counter(); _say(f"✅ Parse em {t6 - t5:.2f}s")
     _say(f"🏁 Concluído em {t6 - t0:.2f}s")
     return df
+
+# =====================================================
+# Utilitário de compatibilidade: evita ImportError
+# =====================================================
+
+def recarregar_dados() -> None:
+    """
+    Compatibilidade: algumas partes do projeto podem importar 'recarregar_dados'.
+    Esta função limpa o cache de bytes/etag do Excel e invalida caches de leitura.
+    """
+    # limpa store de bytes/etag
+    store = _excel_bytes_store()
+    store["etag"] = None
+    store["bytes"] = None
+    store["last_modified"] = None
+    # limpa somente caches de leitura deste módulo
+    try:
+        st.cache_data.clear()  # invalida baixar_aba_excel / baixar_arquivo_excel
+    except Exception:
+        pass

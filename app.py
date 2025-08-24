@@ -6,6 +6,7 @@ import os
 from io import BytesIO
 from datetime import datetime
 from time import perf_counter
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # ============================
 # Timer geral do app
@@ -321,6 +322,7 @@ if aplicar or not st.session_state.filtros_aplicados:
 # usa o cache do resultado
 df_filtrado = st.session_state.df_filtrado_cached if st.session_state.df_filtrado_cached is not None else df_semana
 
+
 st.subheader(f"Valores atuais filtrados – {st.session_state.semana_nova}")
 
 # Preview leve
@@ -329,11 +331,29 @@ limite = st.session_state.limite_preview_linhas
 preview = df_filtrado.head(limite)
 
 st.caption(f"Mostrando até {limite:,} de {total_linhas:,} linhas.")
-st.dataframe(preview, use_container_width=True, height=420)
 
-if total_linhas > limite:
-    with st.expander(f"Mostrar todas as {total_linhas:,} linhas (pode ficar pesado)"):
-        st.dataframe(df_filtrado, use_container_width=True, height=520)
+# Configuração interativa com AgGrid
+gb = GridOptionsBuilder.from_dataframe(preview)
+gb.configure_pagination(paginationAutoPageSize=True)  # paginação automática
+gb.configure_side_bar()  # barra lateral para exibir/ocultar colunas
+gb.configure_default_column(
+    editable=False,
+    filter=True,
+    sortable=True,
+    resizable=True,
+)
+gb.configure_column("Classificação", pinned="left")  # fixa a primeira coluna
+grid_options = gb.build()
+
+AgGrid(
+    preview,
+    gridOptions=grid_options,
+    enable_enterprise_modules=False,
+    update_mode=GridUpdateMode.NO_UPDATE,
+    fit_columns_on_grid_load=True,
+    height=420,
+    width="100%",
+)
 
 # ============================
 # Edição de Valores (sem I/O)

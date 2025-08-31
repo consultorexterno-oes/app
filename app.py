@@ -370,9 +370,10 @@ st.subheader("Edição de Valores")
 df_editavel = df_filtrado.copy()
 
 
-# Converte colunas de meses para float (garante que o number_input funcione)
+# Converte colunas de meses para numérico, mas mantém NaN caso não exista valor
 for col in st.session_state.meses_disponiveis:
-    df_editavel[col] = pd.to_numeric(df_editavel[col], errors="coerce").fillna(0.0)
+    df_editavel[col] = pd.to_numeric(df_editavel[col], errors="coerce")
+
 
 # Cria inputs para cada linha x mês
 edicoes = []
@@ -382,12 +383,19 @@ for idx, row in df_editavel.iterrows():
     novos_valores = {}
     for i, mes in enumerate(st.session_state.meses_disponiveis):
         with cols[i]:
+            valor_atual = row[mes]
+            try:
+                valor_float = float(valor_atual) if pd.notna(valor_atual) else 0.0
+            except Exception:
+                valor_float = 0.0
+
             novos_valores[mes] = st.number_input(
                 st.session_state.meses_display.get(mes, mes),
-                value=float(row[mes]),
+                value=valor_float,
                 step=100.0,
                 key=f"edit_{idx}_{mes}"
             )
+
     # guarda edições
     for mes, novo_valor in novos_valores.items():
         if novo_valor != row[mes]:

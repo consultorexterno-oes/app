@@ -263,22 +263,44 @@ with st.form("form_filtros", clear_on_submit=False):
     col1, col2, col3 = st.columns(3)
     with col1:
         opcoes_coligada = ["Todos"] + sorted(df_semana["Classificação"].dropna().unique().tolist())
-        coligada_filtro = st.selectbox("Coligada", opcoes_coligada, index=opcoes_coligada.index(st.session_state.filtro_coligada) if st.session_state.filtro_coligada in opcoes_coligada else 0)
+        coligada_filtro = st.selectbox(
+            "Coligada",
+            opcoes_coligada,
+            index=opcoes_coligada.index(st.session_state.filtro_coligada)
+            if st.session_state.filtro_coligada in opcoes_coligada else 0
+        )
+
     with col2:
         opcoes_gerencia = ["Todos"] + sorted(df_semana["Gerência"].dropna().unique().tolist())
-        gerencia_filtro = st.selectbox("Gerência", opcoes_gerencia, index=opcoes_gerencia.index(st.session_state.filtro_gerencia) if st.session_state.filtro_gerencia in opcoes_gerencia else 0)
+        gerencia_filtro = st.selectbox(
+            "Gerência",
+            opcoes_gerencia,
+            index=opcoes_gerencia.index(st.session_state.filtro_gerencia)
+            if st.session_state.filtro_gerencia in opcoes_gerencia else 0
+        )
+
     with col3:
         if gerencia_filtro == "Todos":
-            opcoes_complexo = ["Todos"] + sorted(df_semana["Complexo"].dropna().unique().tolist())
+            opcoes_complexo = sorted(df_semana["Complexo"].dropna().unique().tolist())
         else:
-            opcoes_complexo = ["Todos"] + sorted(
+            opcoes_complexo = sorted(
                 df_semana.loc[df_semana["Gerência"] == gerencia_filtro, "Complexo"].dropna().unique().tolist()
             )
-        complexo_filtro = st.selectbox("Complexo", opcoes_complexo, index=opcoes_complexo.index(st.session_state.filtro_complexo) if st.session_state.filtro_complexo in opcoes_complexo else 0)
+        opcoes_complexo = ["Todos"] + opcoes_complexo
+
+        complexos_selecionados = st.multiselect(
+            "Complexo",
+            options=opcoes_complexo,
+            default=(
+                [st.session_state.filtro_complexo]
+                if st.session_state.filtro_complexo in opcoes_complexo
+                else ["Todos"]
+            )
+        )
 
     col4, col5 = st.columns(2)
     with col4:
-        if complexo_filtro == "Todos":
+        if not complexos_selecionados or "Todos" in complexos_selecionados:
             if gerencia_filtro == "Todos":
                 opcoes_area = ["Todos"] + sorted(df_semana["Área"].dropna().unique().tolist())
             else:
@@ -287,15 +309,29 @@ with st.form("form_filtros", clear_on_submit=False):
                 )
         else:
             opcoes_area = ["Todos"] + sorted(
-                df_semana.loc[df_semana["Complexo"] == complexo_filtro, "Área"].dropna().unique().tolist()
+                df_semana.loc[df_semana["Complexo"].isin(complexos_selecionados), "Área"].dropna().unique().tolist()
             )
-        area_filtro = st.selectbox("Área", opcoes_area, index=opcoes_area.index(st.session_state.filtro_area) if st.session_state.filtro_area in opcoes_area else 0)
+
+        area_filtro = st.selectbox(
+            "Área",
+            opcoes_area,
+            index=opcoes_area.index(st.session_state.filtro_area)
+            if st.session_state.filtro_area in opcoes_area else 0
+        )
 
     with col5:
-        opcoes_analise = ["Todos"] + [v for v in VALORES_ANALISE if v in df_semana["Análise de emissão"].unique()]
-        analise_filtro = st.selectbox("Análise de emissão", opcoes_analise, index=opcoes_analise.index(st.session_state.filtro_analise) if st.session_state.filtro_analise in opcoes_analise else 0)
+        opcoes_analise = ["Todos"] + [
+            v for v in VALORES_ANALISE if v in df_semana["Análise de emissão"].unique()
+        ]
+        analise_filtro = st.selectbox(
+            "Análise de emissão",
+            opcoes_analise,
+            index=opcoes_analise.index(st.session_state.filtro_analise)
+            if st.session_state.filtro_analise in opcoes_analise else 0
+        )
 
     aplicar = st.form_submit_button("Aplicar filtros")
+
 
 # Só filtra quando o usuário clicar
 if aplicar or not st.session_state.filtros_aplicados:
@@ -304,8 +340,8 @@ if aplicar or not st.session_state.filtros_aplicados:
         df_filtrado = df_filtrado[df_filtrado["Classificação"] == coligada_filtro]
     if gerencia_filtro != "Todos":
         df_filtrado = df_filtrado[df_filtrado["Gerência"] == gerencia_filtro]
-    if complexo_filtro != "Todos":
-        df_filtrado = df_filtrado[df_filtrado["Complexo"] == complexo_filtro]
+    if complexos_selecionados and "Todos" not in complexos_selecionados:
+        df_filtrado = df_filtrado[df_filtrado["Complexo"].isin(complexos_selecionados)]
     if area_filtro != "Todos":
         df_filtrado = df_filtrado[df_filtrado["Área"] == area_filtro]
     if analise_filtro != "Todos":
@@ -315,163 +351,63 @@ if aplicar or not st.session_state.filtros_aplicados:
     st.session_state.filtros_aplicados = True
     st.session_state.filtro_coligada = coligada_filtro
     st.session_state.filtro_gerencia = gerencia_filtro
-    st.session_state.filtro_complexo = complexo_filtro
+    st.session_state.filtro_complexo = complexos_selecionados  # agora guarda lista
     st.session_state.filtro_area = area_filtro
     st.session_state.filtro_analise = analise_filtro
 
-# usa o cache do resultado
-df_filtrado = st.session_state.df_filtrado_cached if st.session_state.df_filtrado_cached is not None else df_semana
-
-
-st.subheader(f"Valores atuais filtrados – {st.session_state.semana_nova}")
-
-# Preview leve
-total_linhas = len(df_filtrado)
-limite = st.session_state.limite_preview_linhas
-preview = df_filtrado.head(limite)
-
-st.caption(f"Mostrando até {limite:,} de {total_linhas:,} linhas.")
-
-# Configuração interativa com AgGrid
-gb = GridOptionsBuilder.from_dataframe(preview)
-gb.configure_pagination(paginationAutoPageSize=True)  # paginação automática
-gb.configure_side_bar()  # barra lateral para exibir/ocultar colunas
-gb.configure_default_column(
-    editable=False,
-    filter=True,
-    sortable=True,
-    resizable=True,
-)
-gb.configure_column("Classificação", pinned="left")  # fixa a primeira coluna
-grid_options = gb.build()
-
-AgGrid(
-    preview,
-    gridOptions=grid_options,
-    enable_enterprise_modules=False,
-    update_mode=GridUpdateMode.NO_UPDATE,
-    fit_columns_on_grid_load=True,
-    height=420,
-    width="100%",
+# Sempre garante df_filtrado antes de usar
+df_filtrado = (
+    st.session_state.df_filtrado_cached
+    if st.session_state.df_filtrado_cached is not None
+    else df_semana
 )
 
 # ============================
-# Edição de Valores (sem I/O)
+# Edição de Valores (nova lógica)
 # ============================
 st.subheader("Edição de Valores")
 
-col_edit1, col_edit2, col_edit3 = st.columns(3)
-with col_edit1:
-    coligada_edit = st.selectbox(
-        "Coligada para edição",
-        sorted(df_semana["Classificação"].dropna().unique().tolist()),
-        key="coligada_edit"
-    )
-with col_edit2:
-    gerencia_edit = st.selectbox(
-        "Gerência para edição",
-        sorted(df_semana["Gerência"].dropna().unique().tolist()),
-        key="gerencia_edit"
-    )
-with col_edit3:
-    op_complexo_edit = sorted(
-        df_semana.loc[df_semana["Gerência"] == gerencia_edit, "Complexo"]
-        .dropna().unique().tolist()
-    )
-    complexo_edit = st.selectbox(
-        "Complexo para edição",
-        op_complexo_edit,
-        key="complexo_edit"
-    )
+df_editavel = df_filtrado.copy()
 
-col_edit4, col_edit5 = st.columns(2)
-with col_edit4:
-    op_area_edit = sorted(
-        df_semana.loc[
-            (df_semana["Gerência"] == gerencia_edit) &
-            (df_semana["Complexo"] == complexo_edit),
-            "Área"
-        ].dropna().unique().tolist()
-    )
-    area_edit = st.selectbox(
-        "Área para edição",
-        op_area_edit,
-        key="area_edit"
-    )
-with col_edit5:
-    analise_edit = st.selectbox(
-        "Análise de emissão para edição",
-        [v for v in VALORES_ANALISE if v in df_semana["Análise de emissão"].unique()],
-        key="analise_edit"
-    )
 
-mes_edit = st.selectbox(
-    "Mês para edição",
-    options=st.session_state.meses_disponiveis,
-    format_func=lambda x: st.session_state.meses_display.get(x, x),
-    key="mes_edit"
-)
+# Converte colunas de meses para float (garante que o number_input funcione)
+for col in st.session_state.meses_disponiveis:
+    df_editavel[col] = pd.to_numeric(df_editavel[col], errors="coerce").fillna(0.0)
 
-# Valor atual (somente memória)
-linhas_filtradas_edit = df_semana[
-    (df_semana["Classificação"] == coligada_edit) &
-    (df_semana["Gerência"] == gerencia_edit) &
-    (df_semana["Complexo"] == complexo_edit) &
-    (df_semana["Área"] == area_edit) &
-    (df_semana["Análise de emissão"] == analise_edit)
-]
-
-valor_atual_edit = linhas_filtradas_edit[mes_edit].values[0] if not linhas_filtradas_edit.empty else 0.0
-try:
-    valor_atual_float_edit = float(valor_atual_edit)
-except Exception:
-    valor_atual_float_edit = 0.0
-
-novo_valor_edit = st.number_input(
-    "Novo valor para essa combinação",
-    value=valor_atual_float_edit,
-    step=100.0,
-    key="novo_valor"
-)
-
-# Adicionar edição (apenas em memória)
-if st.button("Adicionar edição"):
-    if not linhas_filtradas_edit.empty:
-        for idx in linhas_filtradas_edit.index:
-            st.session_state.edicoes.append({
+# Cria inputs para cada linha x mês
+edicoes = []
+for idx, row in df_editavel.iterrows():
+    st.markdown(f"**{row['Classificação']} - {row['Gerência']} - {row['Complexo']} - {row['Área']} - {row['Análise de emissão']}**")
+    cols = st.columns(len(st.session_state.meses_disponiveis))
+    novos_valores = {}
+    for i, mes in enumerate(st.session_state.meses_disponiveis):
+        with cols[i]:
+            novos_valores[mes] = st.number_input(
+                st.session_state.meses_display.get(mes, mes),
+                value=float(row[mes]),
+                step=100.0,
+                key=f"edit_{idx}_{mes}"
+            )
+    # guarda edições
+    for mes, novo_valor in novos_valores.items():
+        if novo_valor != row[mes]:
+            edicoes.append({
                 "index": idx,
-                "Classificação": coligada_edit,
-                "Gerência": gerencia_edit,
-                "Complexo": complexo_edit,
-                "Área": area_edit,
-                "Análise de emissão": analise_edit,
-                "Mês": mes_edit,
-                "Novo Valor": novo_valor_edit,
+                "Classificação": row["Classificação"],
+                "Gerência": row["Gerência"],
+                "Complexo": row["Complexo"],
+                "Área": row["Área"],
+                "Análise de emissão": row["Análise de emissão"],
+                "Mês": mes,
+                "Novo Valor": novo_valor,
                 "Semana": st.session_state.semana_nova,
                 "DataHora": pd.Timestamp.now()
             })
-        st.session_state.has_unsaved_changes = True
-        st.success(
-            f"{len(linhas_filtradas_edit)} edição(ões) adicionada(s): "
-            f"{st.session_state.meses_display.get(mes_edit, mes_edit)} → {novo_valor_edit:.2f}"
-        )
-    else:
-        st.warning("Combinação não encontrada na base.")
 
-# Edições acumuladas
-if st.session_state.edicoes:
-    st.markdown("### Edições em andamento")
-    df_edicoes = pd.DataFrame(st.session_state.edicoes)
-    st.dataframe(df_edicoes, use_container_width=True)
-
-    buffer = BytesIO()
-    df_edicoes.to_excel(buffer, index=False, engine="xlsxwriter")
-    st.download_button(
-        label="Baixar edições em Excel",
-        data=buffer.getvalue(),
-        file_name="edicoes_previstas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+# Atualiza estado de edições
+if edicoes:
+    st.session_state.edicoes = edicoes
+    st.session_state.has_unsaved_changes = True
 
 # ============================
 # Persistência (I/O só aqui)

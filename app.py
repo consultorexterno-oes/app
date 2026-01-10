@@ -29,6 +29,18 @@ st.markdown(f"""
     section[data-testid="stSidebar"] li:nth-of-type(1) a p::after {{ content: 'Preencher Refinado'; visibility: visible; position: absolute; top: 0; left: 0; }}
     section[data-testid="stSidebar"] li:nth-of-type(2) a p {{ visibility: hidden; position: relative; }}
     section[data-testid="stSidebar"] li:nth-of-type(2) a p::after {{ content: 'Gerenciar Semanas'; visibility: visible; position: absolute; top: 0; left: 0; }}
+    
+    .info-box {{ 
+        font-size: 0.85rem; 
+        color: #555; 
+        background-color: #f9f9f9; 
+        padding: 12px; 
+        border-radius: 8px; 
+        border: 1px solid #eee;
+        border-left: 5px solid #E2725B; 
+        margin-bottom: 20px; 
+    }}
+    .info-label {{ font-weight: bold; color: #033347; text-transform: uppercase; font-size: 0.75rem; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -62,14 +74,35 @@ if not st.session_state.autenticado:
 def _filtrar_moderado(df):
     return df[df["Cenário"].str.casefold() == "moderado"].copy() if "Cenário" in df.columns else df
 
+# --- CARREGAMENTO INICIAL ---
 if st.session_state.df_previsto is None:
     info = carregar_semana_ativa(version_token=get_version_token())
-    if not info: st.stop()
+    if not info: 
+        st.error("Nenhuma semana ativa configurada.")
+        st.stop()
     st.session_state.semana_info = info
     st.session_state.semana_nova = str(info.get("semana", ""))
     st.session_state.meses_permitidos_admin = info.get("meses_permitidos", [])
     df = _filtrar_moderado(carregar_previsto_semana_ativa(get_version_token()))
     st.session_state.df_previsto = df
+
+# --- FORMATAÇÃO DOS MESES PARA O INFORMATIVO ---
+meses_formatados = []
+for m in st.session_state.meses_permitidos_admin:
+    try:
+        dt = pd.to_datetime(m, dayfirst=True)
+        meses_formatados.append(dt.strftime("%b/%y").capitalize())
+    except:
+        meses_formatados.append(str(m))
+meses_texto = ", ".join(meses_formatados)
+
+# --- BLOCO INFORMATIVO ---
+st.markdown(f"""
+    <div class="info-box">
+        <span class="info-label">Revisão Ativa:</span> {st.session_state.semana_nova} &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="info-label">Meses Liberados para Edição:</span> {meses_texto if meses_texto else 'Nenhum'}
+    </div>
+""", unsafe_allow_html=True)
 
 if st.sidebar.button("🔄 Recarregar Dados"):
     for key in list(st.session_state.keys()): del st.session_state[key]
@@ -119,15 +152,15 @@ with st.form("form_filtros"):
     sel_ana = c5.multiselect("Análise de emissão", op_ana, default=st.session_state.filtro_analise)
 
     if st.form_submit_button("Aplicar Filtros"):
-        # LÓGICA DE LIMPEZA DO "TODOS" (MUTEX)
-        def limpar_todos(lista):
+        # --- LÓGICA DE EXCLUSÃO MÚTUA (MUTEX) ---
+        def tratar_mutex(lista):
             if len(lista) > 1 and "Todos" in lista:
                 if lista[-1] == "Todos": return ["Todos"]
                 else: return [x for x in lista if x != "Todos"]
             return lista if lista else ["Todos"]
 
-        sel_comp = limpar_todos(sel_comp)
-        sel_ana = limpar_todos(sel_ana)
+        sel_comp = tratar_mutex(sel_comp)
+        sel_ana = tratar_mutex(sel_ana)
 
         df_f = df_semana.copy()
         if sel_col != "Todos": df_f = df_f[df_f["Classificação"] == sel_col]
@@ -158,7 +191,7 @@ for c in cols_edit:
 df_editado = st.data_editor(
     df_input,
     column_config={
-        m: st.column_config.NumberColumn(st.session_state.meses_display.get(m, m), format="R$ %.2f") 
+        m: st.column_config.NumberColumn(st.session_state.meses_display.get(m, m), format="R$ %.2f", min_value=0.0) 
         for m in cols_edit
     },
     disabled=cols_id_fixas,
@@ -191,7 +224,7 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
             for ed in st.session_state.edicoes:
                 st.session_state.df_previsto.at[ed["index"], ed["Mês"]] = ed["Novo Valor"]
             
-            df_para_gravar = _filtrar_moderado(st.session_state.df_previsto)
+            df_para_gravar = st.session_state.df_previsto.copy()
             salvar_base_dados(df_para_gravar)
             salvar_em_aba(pd.DataFrame(st.session_state.edicoes), aba="Histórico")
             
@@ -207,5 +240,9 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
 if st.session_state.has_unsaved_changes:
     c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas na tabela. Clique em 'Salvar' para confirmar.")
 
-st.sidebar.info(f"Semana Ativa: {st.session_state.semana_nova}")
+# Sidebar informativa adicional
+st.sidebar.markdown("---")
+st.sidebar.caption(f"📅 **Configuração Atual**")
+st.sidebar.caption(f"Semana: {st.session_state.semana_nova}")
+st.sidebar.caption(f"Meses: {meses_texto}")
 st.sidebar.write(f"⏱️ Interação: {time.time() - _start_total:.2f}s")

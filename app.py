@@ -20,7 +20,7 @@ from api.graph_api import carregar_semana_ativa
 
 st.set_page_config(page_title="Rota 27", layout="wide")
 
-# Estilização Visual
+# --- Estilização Visual ---
 st.markdown(f"""
     <style>
     :root {{ color-scheme: light !important; }}
@@ -44,21 +44,34 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# --- Inicialização do State ---
 def init_state():
     defaults = {
-        "autenticado": False, "df_previsto": None, "semana_info": None, "semana_nova": None,
-        "meses_permitidos_admin": [], "edicoes": [], "has_unsaved_changes": False,
-        "meses_disponiveis": [], "meses_display": {}, "df_semana_cached": None,
-        "df_filtrado_cached": None, "filtros_aplicados": False,
-        "filtro_coligada": "Todos", "filtro_gerencia": "Todos", "filtro_complexo": ["Todos"],
+        "autenticado": False, 
+        "df_previsto": None, 
+        "semana_info": None, 
+        "semana_nova": None,
+        "meses_permitidos_admin": [], 
+        "edicoes": [], 
+        "has_unsaved_changes": False,
+        "meses_disponiveis": [], 
+        "meses_display": {}, 
+        "df_semana_cached": None,
+        "df_filtrado_cached": None, 
+        "filtros_aplicados": False,
+        "filtro_coligada": "Todos", 
+        "filtro_gerencia": "Todos", 
+        "filtro_complexo": ["Todos"],
         "filtro_area": "Todos", 
         "filtro_analise": ["Todos"]
     }
     for k, v in defaults.items():
-        if k not in st.session_state: st.session_state[k] = v
+        if k not in st.session_state: 
+            st.session_state[k] = v
 
 init_state()
 
+# --- Logo e Login ---
 st.image("assets/Logo Rota 27.png", width=400)
 st.title("Refinado Semanal - Preenchimento")
 
@@ -68,25 +81,43 @@ if not st.session_state.autenticado:
         if pw == "Narota27":
             st.session_state.autenticado = True
             st.rerun()
-        else: st.error("Incorreta.")
+        else: 
+            st.error("Incorreta.")
     st.stop()
+
+# --- Botão de Recarregar (Ajustado para não deslogar) ---
+if st.sidebar.button("🔄 Recarregar Dados"):
+    # Limpamos o cache global do Streamlit (força a API/IO a ler de novo)
+    st.cache_data.clear()
+    
+    # Resetamos apenas o que é dado, mantendo o "autenticado"
+    keys_to_keep = ["autenticado"]
+    for key in list(st.session_state.keys()):
+        if key not in keys_to_keep:
+            del st.session_state[key]
+    
+    st.rerun()
 
 def _filtrar_moderado(df):
     return df[df["Cenário"].str.casefold() == "moderado"].copy() if "Cenário" in df.columns else df
 
-# --- CARREGAMENTO INICIAL ---
+# --- Carregamento de Dados ---
 if st.session_state.df_previsto is None:
+    # Busca a info da semana ativa (aqui ele pegará a 45 agora)
     info = carregar_semana_ativa(version_token=get_version_token())
     if not info: 
         st.error("Nenhuma semana ativa configurada.")
         st.stop()
+    
     st.session_state.semana_info = info
     st.session_state.semana_nova = str(info.get("semana", ""))
     st.session_state.meses_permitidos_admin = info.get("meses_permitidos", [])
+    
+    # Carrega o dataframe
     df = _filtrar_moderado(carregar_previsto_semana_ativa(get_version_token()))
     st.session_state.df_previsto = df
 
-# --- FORMATAÇÃO DOS MESES PARA O INFORMATIVO ---
+# --- Formatação dos Meses ---
 meses_formatados = []
 for m in st.session_state.meses_permitidos_admin:
     try:
@@ -96,17 +127,13 @@ for m in st.session_state.meses_permitidos_admin:
         meses_formatados.append(str(m))
 meses_texto = ", ".join(meses_formatados)
 
-# --- BLOCO INFORMATIVO ---
+# --- Bloco Informativo ---
 st.markdown(f"""
     <div class="info-box">
         <span class="info-label">Revisão Ativa:</span> {st.session_state.semana_nova} &nbsp;&nbsp; | &nbsp;&nbsp;
         <span class="info-label">Meses Liberados para Edição:</span> {meses_texto if meses_texto else 'Nenhum'}
     </div>
 """, unsafe_allow_html=True)
-
-if st.sidebar.button("🔄 Recarregar Dados"):
-    for key in list(st.session_state.keys()): del st.session_state[key]
-    st.rerun()
 
 VALORES_ANALISE = ["RECEITA MAO DE OBRA", "RECEITA LOCAÇÃO", "RECEITA DE INDENIZAÇÃO", "CUSTO COM MAO DE OBRA", "CUSTO COM INSUMOS", "LOCAÇÃO DE EQUIPAMENTOS"]
 
@@ -124,7 +151,7 @@ if not st.session_state.meses_disponiveis:
     st.session_state.meses_disponiveis = cols
     st.session_state.meses_display = {m: pd.to_datetime(m, dayfirst=True).strftime("%b/%y") for m in cols}
 
-# --- BLOCO DE FILTROS ---
+# --- Filtros ---
 st.subheader("Filtros")
 with st.form("form_filtros"):
     c1, c2, c3 = st.columns(3)
@@ -152,7 +179,6 @@ with st.form("form_filtros"):
     sel_ana = c5.multiselect("Análise de emissão", op_ana, default=st.session_state.filtro_analise)
 
     if st.form_submit_button("Aplicar Filtros"):
-        # --- LÓGICA DE EXCLUSÃO MÚTUA (MUTEX) ---
         def tratar_mutex(lista):
             if len(lista) > 1 and "Todos" in lista:
                 if lista[-1] == "Todos": return ["Todos"]
@@ -179,7 +205,7 @@ with st.form("form_filtros"):
 
 df_work = st.session_state.df_filtrado_cached if st.session_state.df_filtrado_cached is not None else df_semana
 
-# --- EDIÇÃO ---
+# --- Editor ---
 st.subheader(f"Edição: {len(df_work)} registros encontrados")
 cols_id_fixas = ["Classificação", "Gerência", "Complexo", "Área", "Análise de emissão"]
 cols_edit = st.session_state.meses_disponiveis
@@ -200,7 +226,7 @@ df_editado = st.data_editor(
     key="editor_refinado"
 )
 
-# Detecção de mudanças
+# --- Detecção de Mudanças ---
 if not df_editado.equals(df_input):
     st.session_state.has_unsaved_changes = True
     changes = []
@@ -216,7 +242,7 @@ if not df_editado.equals(df_input):
                 })
     st.session_state.edicoes = changes
 
-# --- SALVAMENTO ---
+# --- Salvamento ---
 c_salvar, c_info = st.columns([1, 3])
 if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has_unsaved_changes):
     try:
@@ -238,7 +264,7 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
         st.error(f"Erro ao salvar: {e}")
 
 if st.session_state.has_unsaved_changes:
-    c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas na tabela. Clique em 'Salvar' para confirmar.")
+    c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas. Clique em 'Salvar' para confirmar.")
 
 # Sidebar informativa adicional
 st.sidebar.markdown("---")

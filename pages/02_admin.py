@@ -42,7 +42,7 @@ if not st.session_state.get("autenticado_admin", False):
         else: st.error("Senha incorreta.")
     st.stop()
 
-# 2. Carregamento com Cache (Evita lentidão ao navegar entre abas)
+# 2. Carregamento com Cache
 @st.cache_data(ttl=600)
 def fetch_data(token):
     return carregar_previsto(token)
@@ -50,10 +50,9 @@ def fetch_data(token):
 df_previsto = fetch_data(get_version_token())
 controle = carregar_semana_ativa(version_token=get_version_token()) or {}
 
-# 3. Limpeza de Colunas (Removendo IDs e "Observações:")
+# 3. Limpeza de Colunas
 metadados_fixos = ["Revisão", "Cenário", "Semana", "Observações:", "ID", "DataHora"]
 colunas_ignore = list(set(COLUNAS_ID + metadados_fixos))
-# Garante que cols_m seja acessível em todo o script
 cols_m = [c for c in df_previsto.columns if c not in colunas_ignore]
 
 def fmt_mes(m):
@@ -67,7 +66,9 @@ c1, c2 = st.columns(2)
 with c1:
     st.markdown(f'<div class="status-card"><span class="card-label">Semana Ativa</span><span class="card-value">{controle.get("semana", "---")}</span></div>', unsafe_allow_html=True)
 with c2:
-    m_ativos = [fmt_mes(m) for m in controle.get("meses_permitidos", [])]
+    # Garantindo que meses_permitidos seja iterável para o formatador
+    permitidos_brutos = controle.get("meses_permitidos", [])
+    m_ativos = [fmt_mes(m) for m in permitidos_brutos]
     st.markdown(f'<div class="status-card"><span class="card-label">Meses Liberados</span><span class="card-value">{", ".join(m_ativos) if m_ativos else "Nenhum"}</span></div>', unsafe_allow_html=True)
 
 tab_create, tab_edit, tab_view = st.tabs(["🆕 Criar Nova Semana", "🔧 Ajustar Ativa", "📊 Base Completa"])
@@ -77,10 +78,10 @@ with tab_create:
     with st.form("form_nova_semana"):
         ca, cb = st.columns(2)
         origem = ca.selectbox("Copiar dados da revisão:", sorted(df_previsto["Revisão"].unique(), reverse=True))
-        novo = cb.text_input("Nome da nova semana:", placeholder="Ex: Semana 05")
+        novo = cb.text_input("Nome da nova semana:", placeholder="Ex: Semana 48 - 2026")
         
         meses_sel = st.multiselect("Liberar meses para os gerentes:", options=cols_m, 
-                                   default=cols_m[-6:] if len(cols_m) >= 6 else cols_m, format_func=fmt_mes)
+                                    default=cols_m[-6:] if len(cols_m) >= 6 else cols_m, format_func=fmt_mes)
         
         btn_executar = st.form_submit_button("Gerar e Ativar Ciclo")
 
@@ -88,26 +89,27 @@ with tab_create:
         if not novo or novo in df_previsto["Revisão"].unique():
             st.error("Nome inválido ou semana já existente.")
         else:
-            t_inicio_total = time.perf_counter() # Início do cronômetro global
+            t_inicio_total = time.perf_counter()
             
             with st.status("🚀 Iniciando processamento...", expanded=True) as status:
-                # Etapa 1
                 st.write("📂 Clonando dados da revisão de origem...")
                 t_step = time.perf_counter()
                 df_nova = df_previsto[df_previsto["Revisão"] == origem].copy()
                 df_nova["Revisão"] = novo
                 st.write(f"✓ Clonagem concluída ({time.perf_counter() - t_step:.2f}s)")
                 
-                # Etapa 2
                 st.write("📡 Enviando dados para o SharePoint...")
                 t_step = time.perf_counter()
                 salvar_base_dados(df_nova, append=True)
                 st.write(f"✓ Base de dados atualizada ({time.perf_counter() - t_step:.2f}s)")
                 
-                # Etapa 3
                 st.write("🔑 Atualizando semana ativa...")
                 t_step = time.perf_counter()
-                df_ctrl = pd.DataFrame({"Semana Ativa": [novo], "Meses Permitidos": [";".join(meses_sel)]})
+                
+                # AJUSTE AQUI: map(str, meses_sel) evita o TypeError com datas de 2026
+                str_meses = ";".join(map(str, meses_sel))
+                df_ctrl = pd.DataFrame({"Semana Ativa": [novo], "Meses Permitidos": [str_meses]})
+                
                 salvar_apenas_aba("Controle", df_ctrl)
                 st.write(f"✓ Semana {novo} definida como ativa ({time.perf_counter() - t_step:.2f}s)")
                 
@@ -115,8 +117,6 @@ with tab_create:
                 status.update(label="✅ Tudo pronto!", state="complete", expanded=False)
 
             t_total = time.perf_counter() - t_inicio_total
-            
-            # Print do tempo gasto na tela
             st.markdown(f"""
                 <div class="timer-display">
                     ✅ SUCESSO! A {novo} foi gerada e ativada.<br>
@@ -125,7 +125,7 @@ with tab_create:
             """, unsafe_allow_html=True)
             
             st.balloons()
-            time.sleep(3)
+            time.sleep(2)
             st.rerun()
 
 # --- ABA 2: AJUSTAR ATIVA ---
@@ -133,17 +133,26 @@ with tab_edit:
     st.subheader("Manutenção de Exibição")
     cx, cy = st.columns(2)
     opcoes_rev = sorted(df_previsto["Revisão"].unique(), reverse=True)
-    sel_ativa = cx.selectbox("Mudar semana ativa para:", opcoes_rev, 
-                             index=opcoes_rev.index(controle.get("semana")) if controle.get("semana") in opcoes_rev else 0)
+    
+    semana_atual_ctrl = controle.get("semana")
+    idx_default = opcoes_rev.index(semana_atual_ctrl) if semana_atual_ctrl in opcoes_rev else 0
+    
+    sel_ativa = cx.selectbox("Mudar semana ativa para:", opcoes_rev, index=idx_default)
+    
+    # Filtro para garantir que meses salvos existam nas colunas atuais
+    default_meses = [m for m in controle.get("meses_permitidos", []) if m in cols_m]
     
     sel_meses = cy.multiselect("Ajustar meses abertos:", options=cols_m, 
-                                default=[m for m in controle.get("meses_permitidos", []) if m in cols_m],
+                                default=default_meses,
                                 format_func=fmt_mes, key="ajuste_admin")
     
     if st.button("Salvar Ajustes"):
         t_ajuste = time.perf_counter()
         with st.spinner("Salvando..."):
-            df_m = pd.DataFrame({"Semana Ativa": [sel_ativa], "Meses Permitidos": [";".join(sel_meses)]})
+            # AJUSTE AQUI TAMBÉM: map(str, sel_meses)
+            str_meses_ajuste = ";".join(map(str, sel_meses))
+            df_m = pd.DataFrame({"Semana Ativa": [sel_ativa], "Meses Permitidos": [str_meses_ajuste]})
+            
             salvar_apenas_aba("Controle", df_m)
             bump_version_token()
             st.success(f"Configurações atualizadas em {time.perf_counter() - t_ajuste:.2f}s!")

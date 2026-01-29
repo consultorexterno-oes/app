@@ -44,6 +44,13 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# --- Funções de Suporte Dinâmico ---
+def safe_to_datetime(val):
+    """Garante conversão correta de datas para evitar inversão de mês/dia."""
+    if isinstance(val, (datetime, pd.Timestamp)):
+        return val
+    return pd.to_datetime(val, dayfirst=True, errors='coerce')
+
 def init_state():
     defaults = {
         "autenticado": False, 
@@ -70,6 +77,7 @@ def init_state():
 
 init_state()
 
+# --- Logo e Login ---
 st.image("assets/Logo Rota 27.png", width=400)
 st.title("Refinado Semanal - Preenchimento")
 
@@ -83,6 +91,7 @@ if not st.session_state.autenticado:
             st.error("Incorreta.")
     st.stop()
 
+# --- Recarregar ---
 if st.sidebar.button("🔄 Recarregar Dados"):
     st.cache_data.clear()
     keys_to_keep = ["autenticado"]
@@ -103,9 +112,12 @@ if st.session_state.df_previsto is None:
     
     st.session_state.semana_info = info
     st.session_state.semana_nova = str(info.get("semana", ""))
-    # Garantimos que a lista de meses permitidos venha limpa
+    
+    # Normalização dos meses vindos do Admin (ISO YYYY-MM-DD)
     permitidos = info.get("meses_permitidos", [])
-    st.session_state.meses_permitidos_admin = [str(m).strip() for m in permitidos if m]
+    st.session_state.meses_permitidos_admin = [
+        safe_to_datetime(m).strftime("%Y-%m-%d") for m in permitidos if pd.notnull(safe_to_datetime(m))
+    ]
     
     df = _filtrar_moderado(carregar_previsto_semana_ativa(get_version_token()))
     st.session_state.df_previsto = df
@@ -113,16 +125,13 @@ if st.session_state.df_previsto is None:
 # --- Formatação dos Meses (DEDUPLICADO) ---
 meses_formatados = []
 for m in st.session_state.meses_permitidos_admin:
-    try:
-        dt = pd.to_datetime(m, dayfirst=True)
-        txt = dt.strftime("%b/%y").capitalize()
-        if txt not in meses_formatados: # Evita Jan/26, Jan/26
-            meses_formatados.append(txt)
-    except:
-        if str(m) not in meses_formatados:
-            meses_formatados.append(str(m))
+    label = safe_to_datetime(m).strftime("%b/%y").capitalize()
+    if label not in meses_formatados:
+        meses_formatados.append(label)
+
 meses_texto = ", ".join(meses_formatados)
 
+# --- Bloco Informativo ---
 st.markdown(f"""
     <div class="info-box">
         <span class="info-label">Revisão Ativa:</span> {st.session_state.semana_nova} &nbsp;&nbsp; | &nbsp;&nbsp;
@@ -139,16 +148,17 @@ if st.session_state.df_semana_cached is None:
 
 df_semana = st.session_state.df_semana_cached
 
+# --- Sincronização de Colunas do Editor ---
 if not st.session_state.meses_disponiveis:
     cols = [c for c in df_semana.columns if c not in COLUNAS_ID and pd.to_datetime(c, errors='coerce', dayfirst=True) is not pd.NaT]
+    
     if st.session_state.meses_permitidos_admin:
-        # Normalização para comparação: converte ambos para string de data simples
-        def normalize(x): return str(pd.to_datetime(x, dayfirst=True).date())
-        permitidos_norm = [normalize(m) for m in st.session_state.meses_permitidos_admin]
-        cols = [c for c in cols if normalize(c) in permitidos_norm]
+        # Comparação segura via ISO YYYY-MM-DD
+        permitidos_norm = st.session_state.meses_permitidos_admin
+        cols = [c for c in cols if safe_to_datetime(c).strftime("%Y-%m-%d") in permitidos_norm]
         
     st.session_state.meses_disponiveis = cols
-    st.session_state.meses_display = {m: pd.to_datetime(m, dayfirst=True).strftime("%b/%y") for m in cols}
+    st.session_state.meses_display = {m: safe_to_datetime(m).strftime("%b/%y") for m in cols}
 
 # --- Filtros ---
 st.subheader("Filtros")
@@ -223,6 +233,7 @@ df_editado = st.data_editor(
     key="editor_refinado"
 )
 
+# --- Detecção de Mudanças ---
 if not df_editado.equals(df_input):
     st.session_state.has_unsaved_changes = True
     changes = []
@@ -238,6 +249,7 @@ if not df_editado.equals(df_input):
                 })
     st.session_state.edicoes = changes
 
+# --- Salvamento ---
 c_salvar, c_info = st.columns([1, 3])
 if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has_unsaved_changes):
     try:
@@ -261,6 +273,7 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
 if st.session_state.has_unsaved_changes:
     c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas. Clique em 'Salvar' para confirmar.")
 
+# Sidebar informativa adicional
 st.sidebar.markdown("---")
 st.sidebar.caption(f"📅 **Configuração Atual**")
 st.sidebar.caption(f"Semana: {st.session_state.semana_nova}")

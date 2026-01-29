@@ -45,7 +45,7 @@ with st.sidebar:
 
 # 2. Autenticação
 if not st.session_state.get("autenticado_admin", False):
-    st.subheader("Página do Administrador - Acesso restrito 💻")
+    st.subheader("Página do Administrador - Acesso restrito 💻🔐")
     pw = st.text_input("Senha Master:", type="password")
     if st.button("Entrar"):
         if pw == "adm_oes":

@@ -44,7 +44,6 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Inicialização do State ---
 def init_state():
     defaults = {
         "autenticado": False, 
@@ -71,7 +70,6 @@ def init_state():
 
 init_state()
 
-# --- Logo e Login ---
 st.image("assets/Logo Rota 27.png", width=400)
 st.title("Refinado Semanal - Preenchimento")
 
@@ -85,17 +83,12 @@ if not st.session_state.autenticado:
             st.error("Incorreta.")
     st.stop()
 
-# --- Botão de Recarregar (Ajustado para não deslogar) ---
 if st.sidebar.button("🔄 Recarregar Dados"):
-    # Limpamos o cache global do Streamlit (força a API/IO a ler de novo)
     st.cache_data.clear()
-    
-    # Resetamos apenas o que é dado, mantendo o "autenticado"
     keys_to_keep = ["autenticado"]
     for key in list(st.session_state.keys()):
         if key not in keys_to_keep:
             del st.session_state[key]
-    
     st.rerun()
 
 def _filtrar_moderado(df):
@@ -103,7 +96,6 @@ def _filtrar_moderado(df):
 
 # --- Carregamento de Dados ---
 if st.session_state.df_previsto is None:
-    # Busca a info da semana ativa (aqui ele pegará a 45 agora)
     info = carregar_semana_ativa(version_token=get_version_token())
     if not info: 
         st.error("Nenhuma semana ativa configurada.")
@@ -111,23 +103,26 @@ if st.session_state.df_previsto is None:
     
     st.session_state.semana_info = info
     st.session_state.semana_nova = str(info.get("semana", ""))
-    st.session_state.meses_permitidos_admin = info.get("meses_permitidos", [])
+    # Garantimos que a lista de meses permitidos venha limpa
+    permitidos = info.get("meses_permitidos", [])
+    st.session_state.meses_permitidos_admin = [str(m).strip() for m in permitidos if m]
     
-    # Carrega o dataframe
     df = _filtrar_moderado(carregar_previsto_semana_ativa(get_version_token()))
     st.session_state.df_previsto = df
 
-# --- Formatação dos Meses ---
+# --- Formatação dos Meses (DEDUPLICADO) ---
 meses_formatados = []
 for m in st.session_state.meses_permitidos_admin:
     try:
         dt = pd.to_datetime(m, dayfirst=True)
-        meses_formatados.append(dt.strftime("%b/%y").capitalize())
+        txt = dt.strftime("%b/%y").capitalize()
+        if txt not in meses_formatados: # Evita Jan/26, Jan/26
+            meses_formatados.append(txt)
     except:
-        meses_formatados.append(str(m))
+        if str(m) not in meses_formatados:
+            meses_formatados.append(str(m))
 meses_texto = ", ".join(meses_formatados)
 
-# --- Bloco Informativo ---
 st.markdown(f"""
     <div class="info-box">
         <span class="info-label">Revisão Ativa:</span> {st.session_state.semana_nova} &nbsp;&nbsp; | &nbsp;&nbsp;
@@ -147,7 +142,11 @@ df_semana = st.session_state.df_semana_cached
 if not st.session_state.meses_disponiveis:
     cols = [c for c in df_semana.columns if c not in COLUNAS_ID and pd.to_datetime(c, errors='coerce', dayfirst=True) is not pd.NaT]
     if st.session_state.meses_permitidos_admin:
-        cols = [m for m in cols if m in st.session_state.meses_permitidos_admin]
+        # Normalização para comparação: converte ambos para string de data simples
+        def normalize(x): return str(pd.to_datetime(x, dayfirst=True).date())
+        permitidos_norm = [normalize(m) for m in st.session_state.meses_permitidos_admin]
+        cols = [c for c in cols if normalize(c) in permitidos_norm]
+        
     st.session_state.meses_disponiveis = cols
     st.session_state.meses_display = {m: pd.to_datetime(m, dayfirst=True).strftime("%b/%y") for m in cols}
 
@@ -155,7 +154,6 @@ if not st.session_state.meses_disponiveis:
 st.subheader("Filtros")
 with st.form("form_filtros"):
     c1, c2, c3 = st.columns(3)
-    
     op_col = ["Todos"] + sorted(df_semana["Classificação"].unique().tolist())
     sel_col = c1.selectbox("Coligada", op_col, index=op_col.index(st.session_state.filtro_coligada) if st.session_state.filtro_coligada in op_col else 0)
 
@@ -167,7 +165,6 @@ with st.form("form_filtros"):
     sel_comp = c3.multiselect("Complexo", op_comp, default=st.session_state.filtro_complexo)
 
     c4, c5 = st.columns(2)
-    
     base_area = df_semana
     if sel_comp and "Todos" not in sel_comp: base_area = df_semana[df_semana["Complexo"].isin(sel_comp)]
     elif sel_ger != "Todos": base_area = df_semana[df_semana["Gerência"] == sel_ger]
@@ -226,7 +223,6 @@ df_editado = st.data_editor(
     key="editor_refinado"
 )
 
-# --- Detecção de Mudanças ---
 if not df_editado.equals(df_input):
     st.session_state.has_unsaved_changes = True
     changes = []
@@ -242,7 +238,6 @@ if not df_editado.equals(df_input):
                 })
     st.session_state.edicoes = changes
 
-# --- Salvamento ---
 c_salvar, c_info = st.columns([1, 3])
 if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has_unsaved_changes):
     try:
@@ -266,7 +261,6 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
 if st.session_state.has_unsaved_changes:
     c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas. Clique em 'Salvar' para confirmar.")
 
-# Sidebar informativa adicional
 st.sidebar.markdown("---")
 st.sidebar.caption(f"📅 **Configuração Atual**")
 st.sidebar.caption(f"Semana: {st.session_state.semana_nova}")

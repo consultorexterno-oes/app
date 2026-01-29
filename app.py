@@ -33,20 +33,21 @@ st.markdown(f"""
     .info-box {{ 
         font-size: 0.85rem; 
         color: #555; 
-        background-color: #f9f9f9; 
-        padding: 12px; 
+        background-color: #fcfcfc; 
+        padding: 15px; 
         border-radius: 8px; 
         border: 1px solid #eee;
-        border-left: 5px solid #E2725B; 
+        border-left: 5px solid #033347; 
         margin-bottom: 20px; 
     }}
     .info-label {{ font-weight: bold; color: #033347; text-transform: uppercase; font-size: 0.75rem; }}
+    .status-badge {{ background-color: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-weight: bold; }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- Funções de Suporte Dinâmico ---
+# --- Funções de Suporte ---
 def safe_to_datetime(val):
-    """Garante conversão correta de datas para evitar inversão de mês/dia."""
+    """Garante leitura correta (dia antes do mês) para evitar Jan/26 duplicado."""
     if isinstance(val, (datetime, pd.Timestamp)):
         return val
     return pd.to_datetime(val, dayfirst=True, errors='coerce')
@@ -88,10 +89,10 @@ if not st.session_state.autenticado:
             st.session_state.autenticado = True
             st.rerun()
         else: 
-            st.error("Incorreta.")
+            st.error("Senha incorreta.")
     st.stop()
 
-# --- Recarregar ---
+# --- Recarregar Dados ---
 if st.sidebar.button("🔄 Recarregar Dados"):
     st.cache_data.clear()
     keys_to_keep = ["autenticado"]
@@ -107,13 +108,13 @@ def _filtrar_moderado(df):
 if st.session_state.df_previsto is None:
     info = carregar_semana_ativa(version_token=get_version_token())
     if not info: 
-        st.error("Nenhuma semana ativa configurada.")
+        st.error("Nenhuma semana ativa configurada no painel Admin.")
         st.stop()
     
     st.session_state.semana_info = info
     st.session_state.semana_nova = str(info.get("semana", ""))
     
-    # Normalização dos meses vindos do Admin (ISO YYYY-MM-DD)
+    # Recebe os meses liberados do Admin (que agora são todos salvos em ISO)
     permitidos = info.get("meses_permitidos", [])
     st.session_state.meses_permitidos_admin = [
         safe_to_datetime(m).strftime("%Y-%m-%d") for m in permitidos if pd.notnull(safe_to_datetime(m))
@@ -122,20 +123,11 @@ if st.session_state.df_previsto is None:
     df = _filtrar_moderado(carregar_previsto_semana_ativa(get_version_token()))
     st.session_state.df_previsto = df
 
-# --- Formatação dos Meses (DEDUPLICADO) ---
-meses_formatados = []
-for m in st.session_state.meses_permitidos_admin:
-    label = safe_to_datetime(m).strftime("%b/%y").capitalize()
-    if label not in meses_formatados:
-        meses_formatados.append(label)
-
-meses_texto = ", ".join(meses_formatados)
-
-# --- Bloco Informativo ---
+# --- Bloco Informativo Simplificado ---
 st.markdown(f"""
     <div class="info-box">
         <span class="info-label">Revisão Ativa:</span> {st.session_state.semana_nova} &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="info-label">Meses Liberados para Edição:</span> {meses_texto if meses_texto else 'Nenhum'}
+        <span class="info-label">Status:</span> <span class="status-badge">Edição Aberta para Todos os Meses</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -148,20 +140,22 @@ if st.session_state.df_semana_cached is None:
 
 df_semana = st.session_state.df_semana_cached
 
-# --- Sincronização de Colunas do Editor ---
+# --- Sincronização de Colunas do Editor (Dinâmica) ---
 if not st.session_state.meses_disponiveis:
+    # Identifica colunas que são datas na planilha
     cols = [c for c in df_semana.columns if c not in COLUNAS_ID and pd.to_datetime(c, errors='coerce', dayfirst=True) is not pd.NaT]
     
+    # Se houver meses específicos no controle, filtramos. Caso contrário, mostramos todos os detectados.
     if st.session_state.meses_permitidos_admin:
-        # Comparação segura via ISO YYYY-MM-DD
         permitidos_norm = st.session_state.meses_permitidos_admin
         cols = [c for c in cols if safe_to_datetime(c).strftime("%Y-%m-%d") in permitidos_norm]
         
     st.session_state.meses_disponiveis = cols
+    # O display do editor continuará mostrando Jan/26, Fev/26... mas sem duplicados
     st.session_state.meses_display = {m: safe_to_datetime(m).strftime("%b/%y") for m in cols}
 
 # --- Filtros ---
-st.subheader("Filtros")
+st.subheader("Filtros de Visualização")
 with st.form("form_filtros"):
     c1, c2, c3 = st.columns(3)
     op_col = ["Todos"] + sorted(df_semana["Classificação"].unique().tolist())
@@ -213,7 +207,7 @@ with st.form("form_filtros"):
 df_work = st.session_state.df_filtrado_cached if st.session_state.df_filtrado_cached is not None else df_semana
 
 # --- Editor ---
-st.subheader(f"Edição: {len(df_work)} registros encontrados")
+st.subheader(f"Editor Refinado: {len(df_work)} registros")
 cols_id_fixas = ["Classificação", "Gerência", "Complexo", "Área", "Análise de emissão"]
 cols_edit = st.session_state.meses_disponiveis
 
@@ -271,11 +265,10 @@ if c_salvar.button("💾 Salvar Alterações", disabled=not st.session_state.has
         st.error(f"Erro ao salvar: {e}")
 
 if st.session_state.has_unsaved_changes:
-    c_info.warning(f"⚠️ Existem {len(st.session_state.edicoes)} células alteradas. Clique em 'Salvar' para confirmar.")
+    c_info.warning(f"⚠️ {len(st.session_state.edicoes)} células alteradas. Clique em 'Salvar' para consolidar.")
 
-# Sidebar informativa adicional
+# Sidebar
 st.sidebar.markdown("---")
-st.sidebar.caption(f"📅 **Configuração Atual**")
-st.sidebar.caption(f"Semana: {st.session_state.semana_nova}")
-st.sidebar.caption(f"Meses: {meses_texto}")
-st.sidebar.write(f"⏱️ Interação: {time.time() - _start_total:.2f}s")
+st.sidebar.caption(f"📅 **Sincronização**")
+st.sidebar.caption(f"Revisão: {st.session_state.semana_nova}")
+st.sidebar.write(f"⏱️ Carregamento: {time.time() - _start_total:.2f}s")

@@ -25,6 +25,9 @@ st.set_page_config(page_title="Rota 27 - Refinado", layout="wide")
 st.markdown("""
     <style>
     :root { color-scheme: light !important; }
+    /* Ajuste para remover o espaço em branco no topo antes da logo */
+    .block-container { padding-top: 2rem !important; }
+    
     .stButton>button { background-color: #033347 !important; color: white !important; border-radius: 8px; width: 100%; }
     .info-box { 
         font-size: 0.85rem; 
@@ -40,6 +43,14 @@ st.markdown("""
     .status-badge { background-color: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
+
+# --- LOGO CENTRALIZADA NO TOPO ---
+# Criamos 3 colunas, a logo fica na do meio para garantir a centralização
+col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
+with col_logo2:
+    st.image("assets/Logo Rota 27.png", use_container_width=True)
+
+st.markdown("---") # Linha sutil de separação
 
 # --- Funções de Suporte ---
 def safe_to_datetime(val):
@@ -62,7 +73,7 @@ init_state()
 
 # --- Barra Lateral ---
 with st.sidebar:
-    st.image("assets/Logo Rota 27.png", width=150)
+    st.image("assets/Logo Rota 27.png", width=120) # Menor na lateral para não poluir
     st.markdown("### 🛠️ Sistema")
     if st.button("🧹 Limpar Cache e Reiniciar"):
         st.cache_data.clear()
@@ -100,7 +111,6 @@ df_base = st.session_state.df_previsto
 
 # --- Identificação de Meses (Lógica para 2026) ---
 if not st.session_state.meses_disponiveis:
-    # Identifica colunas de data ignorando IDs
     cols = [c for c in df_base.columns if c not in COLUNAS_ID and pd.to_datetime(c, errors='coerce', dayfirst=True) is not pd.NaT]
     st.session_state.meses_disponiveis = cols
 
@@ -123,7 +133,6 @@ with st.form("form_filtros"):
     op_area = ["Todos"] + sorted(df_base["Área"].unique().tolist())
     sel_area = c4.selectbox("Área", op_area, index=0)
     
-    # Filtro de Análise de Emissão corrigido
     op_ana = ["Todos"] + sorted(df_base["Análise de emissão"].unique().tolist())
     sel_ana = c5.multiselect("Análise de emissão", op_ana, default=["Todos"])
 
@@ -144,7 +153,6 @@ st.subheader(f"Registros para Refinar: {len(df_work)}")
 cols_edit = st.session_state.meses_disponiveis
 cols_id_fixas = ["Classificação", "Gerência", "Complexo", "Área", "Análise de emissão"]
 
-# Conversão para String para evitar erro de JSON no editor
 df_input = df_work[cols_id_fixas + cols_edit].copy()
 df_input.columns = [str(c) for c in df_input.columns]
 
@@ -175,6 +183,5 @@ if not df_editado.equals(df_input):
         st.session_state.has_unsaved_changes = False
         st.rerun()
 
-# --- Rodapé (CORREÇÃO DO VALUEERROR) ---
-# O erro ocorria porque o 's' estava dentro da especificação de formato
+# --- Rodapé ---
 st.sidebar.caption(f"Interação: {time.time() - _start_total:.2f}s")
